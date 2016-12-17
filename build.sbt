@@ -167,6 +167,14 @@ lazy val dfsDependencies = Seq(
     "com.typesafe.akka" %% "akka-remote" % "2.3.6"
 )
 
+lazy val zettaDependencies = Seq(
+    ws,
+    cache,
+    "commons-io" % "commons-io" % "2.5",
+    "org.json" % "json" % "20151123",
+    "org.scalatestplus" %% "play" % "1.2.0" % "test"
+)
+
 lazy val api = (project in file("modules/api"))
     .enablePlugins(PlayScala)
     .settings(name := "Tuktu-api")
@@ -277,6 +285,17 @@ lazy val dlib = (project in file("modules/dlib"))
     .aggregate(api)
     .dependsOn(api)
     
+lazy val zetta = (project in file("modules/zetta"))
+    .enablePlugins(PlayScala)
+    .settings(name := "Tuktu-zetta")
+    .settings(version := "1.3")
+    .settings(scalaVersion := "2.11.8")
+    .settings(resolvers ++= appResolvers)
+    .settings(libraryDependencies ++= zettaDependencies)
+    .settings(EclipseKeys.skipParents in ThisBuild := false)
+    .aggregate(api)
+    .dependsOn(api)
+    
 lazy val web = (project in file("modules/web"))
     .enablePlugins(PlayScala)
     .settings(name := "Tuktu-web")
@@ -352,7 +371,7 @@ lazy val root = project
     .settings(resolvers ++= appResolvers)
     .settings(libraryDependencies ++= coreDependencies)
     .settings(EclipseKeys.skipParents in ThisBuild := false)
-    .aggregate(api, aws, restapi, nlp, csv, dfs, dl, social, nosql, ml, web, tuktudb, crawler, modeller, viz, dlib)
-    .dependsOn(api, aws, restapi, nlp, csv, dfs, dl, social, nosql, ml, web, tuktudb, crawler, modeller, viz, dlib)
+    .aggregate(api, aws, restapi, nlp, csv, dfs, dl, social, nosql, ml, web, tuktudb, crawler, modeller, viz, dlib, zetta)
+    .dependsOn(api, aws, restapi, nlp, csv, dfs, dl, social, nosql, ml, web, tuktudb, crawler, modeller, viz, dlib, zetta)
 
 scalaVersion := "2.11.8"

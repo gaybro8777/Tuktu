@@ -1,0 +1,36 @@
+{
+	"name": "File Copy Processor",
+	"description": "Copy a file into another.",
+	"class": "tuktu.zetta.processors.files.FileCopyProcessor",
+	"parameters": [
+		{
+			"name": "id",
+			"type": "string",
+			"required": true
+		},
+		{
+			"name": "result",
+			"type": "string",
+			"required": true
+		},
+		{
+			"name": "config",
+			"type": "object",
+			"required": true,
+			"parameters": [
+				{
+					"name": "from",
+					"description": "The file to copy.",
+					"type": "string",
+					"required": true
+				},
+				{
+					"name": "to",
+					"description": "The target file.",
+					"type": "string",
+					"required": true
+				}
+			]
+		}
+	]
+}
