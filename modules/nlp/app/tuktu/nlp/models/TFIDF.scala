@@ -9,23 +9,60 @@ import java.io.ObjectInputStream
 
 class TFIDF() extends BaseModel {
     // Keep track of word counts
-    var wordCounts = collection.mutable.Map.empty[String, Int]
-    var docCounts = 0
+    var wordCounts = collection.mutable.Map.empty[String, collection.mutable.Map[String, Int]]
+    var docCounts = collection.mutable.Map.empty[String, Int]
 
     /**
      * Adds documents to the word counts
      */
-    def addDocument(document: String): Unit = addDocument(Tokenizer.tokenize(document) toList)
+    def addDocument(document: String, label: Option[String]): Unit = addDocument(Tokenizer.tokenize(document) toList, label)
 
-    def addDocument(tokens: List[String]): Unit = {
+    def addDocument(tokens: List[String], label: Option[String]): Unit = {
         // Increment all distinct token counts and document count
         for (token <- tokens.distinct) {
-            if (wordCounts.contains(token))
-                wordCounts(token) += 1
-            else
-                wordCounts += token -> 1
+            if (!wordCounts.contains(token))
+                wordCounts += token -> collection.mutable.Map.empty[String, Int]
+                
+            label match {
+                case Some(lbl) => {
+                    if (!wordCounts.contains(token)) wordCounts += token -> collection.mutable.Map.empty[String, Int]
+                    if (!wordCounts(token).contains(lbl)) wordCounts(token) += lbl -> 0
+                    wordCounts(token)(lbl) += 1
+                }
+                case None => {
+                    if (!wordCounts.contains(token)) wordCounts += token -> collection.mutable.Map.empty[String, Int]
+                    if (!wordCounts(token).contains("")) wordCounts(token) += "" -> 0
+                    wordCounts(token)("") += 1
+                }
+            }
         }
-        docCounts += 1
+        
+        label match {
+            case Some(lbl) => {
+                if (!docCounts.contains(lbl)) docCounts += lbl -> 0
+                docCounts(lbl) += 1
+            }
+            case None => {
+                if (!docCounts.contains("")) docCounts += "" -> 0
+                docCounts("") += 1
+            }
+        }
+    }
+    
+    /**
+     * Computes the inverse document frequency, defined as N / N_t (# docs / # docs containing term)
+     */
+    def computeIDF(term: String) = {
+        // Get the total number of documents
+        val N = docCounts.map(_._2).sum.toDouble
+        // Get the total number of documents containing this token
+        val N_t = if (wordCounts.contains(term)) {
+            if (wordCounts(term).size == 1 && wordCounts(term).head._1 == "")
+                wordCounts(term)("").toDouble // The count is the number of documents
+            else wordCounts(term).size.toDouble // The number of keys is the number of labels/documents
+        } else 0.0
+        
+        Math.log(N / (1.0 + N_t))
     }
 
     /**
@@ -37,10 +74,10 @@ class TFIDF() extends BaseModel {
         val tokensByCount = tokens.groupBy(t => t).map(t => t._1 -> t._2.size)
 
         for ((token, count) <- tokensByCount) yield {
-            token -> (count * math.log(
-                    (1 + docCounts) / // Total document counts
-                    (1 + wordCounts.getOrElse(token, 0)) // Occurrences in documents
-            ))
+            token -> {
+                (1.0 + Math.log(count)) * //TF
+                computeIDF(token) // IDF
+            }
         }
     }
 
@@ -61,7 +98,7 @@ class TFIDF() extends BaseModel {
         ois.close
 
         // Set back weights
-        wordCounts = obj("w").asInstanceOf[collection.mutable.Map[String, Int]]
-        docCounts = obj("d").asInstanceOf[Int]
+        wordCounts = obj("w").asInstanceOf[collection.mutable.Map[String, collection.mutable.Map[String, Int]]]
+        docCounts = obj("d").asInstanceOf[collection.mutable.Map[String, Int]]
     }
 }
