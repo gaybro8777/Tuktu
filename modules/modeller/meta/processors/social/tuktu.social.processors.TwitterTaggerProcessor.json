@@ -33,7 +33,7 @@
 							"name": "keywords",
 							"description": "The keywords to be filtered for what can be found in the tweet.",
 							"type": "array",
-							"required": true,
+							"required": false,
 							"parameters": [
 								{
 									"name": "",
@@ -46,7 +46,7 @@
 							"name": "users",
 							"description": "The users to be filtered for who is relevant to a tweet, for example as author, as mention, as retweeter, or as reply to that user.",
 							"type": "array",
-							"required": true,
+							"required": false,
 							"parameters": [
 								{
 									"name": "",
@@ -57,9 +57,23 @@
 						}
 					]
 				},
+                {
+                    "name": "user_tag_field",
+                    "description": "Define which field is used to retrieve user tags from. Usually it is either 'name', 'screen_name', 'id', or left empty. Leave empty to get at most those strings matching the above users list, which could be a mix of names and ids. Otherwise, get the value of this user tag field of those matching users. For example one could match them by id (put the ids in the above list), and then tag them by name (put 'name' or 'screen_name' here).",
+                    "type": "string",
+                    "required": false,
+                    "default": ""
+                },
 				{
 					"name": "exclude_on_none",
 					"description": "Exclude tweets which do not match any filter.",
+					"type": "boolean",
+					"required": false,
+					"default": false
+				},
+				{
+					"name": "combined",
+					"description": "Combine the tags? If set to false, a map with keys keywords and users is added with all tags. If set to true, a list is returned.",
 					"type": "boolean",
 					"required": false,
 					"default": false
