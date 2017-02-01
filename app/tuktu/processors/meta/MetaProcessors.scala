@@ -189,7 +189,6 @@ class GeneratorConfigStreamProcessor(resultName: String) extends BaseProcessor(r
     var replacements: Map[String, String] = _
     var keepAlive: Boolean = _
     var remoteGenerator: ActorRef = null
-    var remoteGeneratorFut: Future[ActorRef] = _
     val remaining = new AtomicInteger(0)
     val done = new AtomicBoolean(false)
 
@@ -222,29 +221,6 @@ class GeneratorConfigStreamProcessor(resultName: String) extends BaseProcessor(r
 
         // Should we keep the async flow alive or create a new one each DP?
         keepAlive = (config \ "keep_alive").asOpt[Boolean].getOrElse(false)
-        if (keepAlive) {
-            // Set up the remote generator, just once
-            val processors = {
-                val configFile = scala.io.Source.fromFile(Cache.getAs[String]("configRepo").getOrElse("configs") +
-                    "/" + flowField + ".json", "utf-8")
-                val cfg = Json.parse(configFile.mkString).as[JsObject]
-                configFile.close
-                (cfg \ "processors").as[List[JsObject]]
-            }
-            // Manipulate config and set up the remote actor
-            val customConfig = Json.obj(
-                "generators" -> List((Json.obj(
-                    "name" -> "tuktu.generators.AsyncStreamGenerator",
-                    "result" -> "",
-                    "config" -> Json.obj(),
-                    "next" -> next) ++ nodes)),
-                "processors" -> processors)
-
-            // Send a message to our Dispatcher to create the (remote) actor and return us the ActorRef
-            remoteGeneratorFut = (
-                    Akka.system.actorSelection("user/TuktuDispatcher") ? new DispatchRequest(name, Some(customConfig), false, true, false, None)
-            ).asInstanceOf[Future[ActorRef]]
-        }
     }
 
     override def processor(): Enumeratee[DataPacket, DataPacket] = Enumeratee.mapM((data: DataPacket) => Future {
@@ -254,10 +230,31 @@ class GeneratorConfigStreamProcessor(resultName: String) extends BaseProcessor(r
                     forwardData(List(datum))
             } else forwardData(data.data)
         } else {
-            // Initialize the remote generator
-            if (remoteGenerator == null)
-                remoteGenerator = Await.result(remoteGeneratorFut, timeout.duration)
-                
+            if (remoteGenerator == null) {
+                // Set up the remote generator, just once
+                val processors = {
+                    val configFile = scala.io.Source.fromFile(Cache.getAs[String]("configRepo").getOrElse("configs") +
+                        "/" + utils.evaluateTuktuString(flowField, data.data.head) + ".json", "utf-8")
+                    val cfg = Json.parse(configFile.mkString).as[JsObject]
+                    configFile.close
+                    (cfg \ "processors").as[List[JsObject]]
+                }
+                // Manipulate config and set up the remote actor
+                val customConfig = Json.obj(
+                    "generators" -> List((Json.obj(
+                        "name" -> "tuktu.generators.AsyncStreamGenerator",
+                        "result" -> "",
+                        "config" -> Json.obj(),
+                        "next" -> next) ++ nodes)),
+                    "processors" -> processors)
+    
+                // Send a message to our Dispatcher to create the (remote) actor and return us the ActorRef
+                remoteGenerator = Await.result(
+                    (Akka.system.actorSelection("user/TuktuDispatcher") ? new DispatchRequest(name, Some(customConfig), false, true, false, None)).asInstanceOf[Future[ActorRef]],
+                    timeout.duration
+                )
+            }
+
             // Callback order on Futures is not guaranteed, so we need to keep track of number of remaining packages to be sent to actorRef
             // Increment count, and once the data has been sent, decrement the count; if it's 0 and we have reached EOF, broadcast Stop
             remaining.incrementAndGet
@@ -269,14 +266,10 @@ class GeneratorConfigStreamProcessor(resultName: String) extends BaseProcessor(r
         data
     }) compose Enumeratee.onEOF(() => {
         if (keepAlive) {
-            // Initialize the remote generator
-            if (remoteGenerator == null)
-                remoteGenerator = Await.result(remoteGeneratorFut, timeout.duration)
-
             // We have reached EOF, we are done; if no packages are remaining to be sent, broadcast Stop right away,
             // otherwise it will be done right after the last package has been sent
             done.set(true)
-            if (remaining.get == 0)
+            if (remaining.get == 0 && remoteGenerator != null)
                 remoteGenerator ! Broadcast(new StopPacket)
         }
     })
@@ -302,7 +295,7 @@ class GeneratorConfigStreamProcessor(resultName: String) extends BaseProcessor(r
             "processors" -> processors)
 
         // Send a message to our Dispatcher to create the (remote) actor and return us the actorref
-        val fut = Akka.system.actorSelection("user/TuktuDispatcher") ? new DispatchRequest(name, Some(customConfig), false, true, false, None)
+        val fut = Akka.system.actorSelection("user/TuktuDispatcher") ? new DispatchRequest(utils.evaluateTuktuString(name, datum), Some(customConfig), false, true, false, None)
         // Make sure we get actorref set before sending data
         fut onSuccess {
             case generatorActor: ActorRef => {
@@ -320,7 +313,6 @@ class GeneratorConfigStreamProcessor(resultName: String) extends BaseProcessor(r
  */
 class ParallelProcessorActor(processor: Enumeratee[DataPacket, DataPacket]) extends Actor with ActorLogging {
     implicit val timeout = Timeout(Cache.getAs[Int]("timeout").getOrElse(5) seconds)
-    val (enumerator, channel) = Concurrent.broadcast[DataPacket]
     val sinkIteratee: Iteratee[DataPacket, Unit] = Iteratee.ignore
 
     /**
@@ -334,17 +326,15 @@ class ParallelProcessorActor(processor: Enumeratee[DataPacket, DataPacket]) exte
             dp
         })
 
-        def runProcessor() = Enumerator(dp).andThen(Enumerator.eof) |>> (processor compose sendBackEnum compose utils.logEnumeratee("")) &>> sinkIteratee
+        def runProcessor() = Enumerator(dp) |>> (processor compose sendBackEnum compose utils.logEnumeratee("")) &>> sinkIteratee
     }
 
     def receive() = {
         case sp: StopPacket => {
+            Enumerator.eof |>> processor &>> sinkIteratee
             self ! PoisonPill
         }
         case dp: DataPacket => {
-            // Push to all async processors
-            channel.push(dp)
-
             // Send through our enumeratee
             val p = new senderReturningProcessor(sender, dp)
             p.runProcessor()
@@ -402,16 +392,21 @@ class ParallelProcessor(resultName: String) extends BaseProcessor(resultName) {
             }).toMap
 
             // Build the processor pipeline for this generator
-            val (idString, processor) = {
-                val pipeline = controllers.Dispatcher.buildEnums(List(start), processorMap, None, "Parallel Processor - Unknown", true)
-                (pipeline._1, pipeline._2.head)
+            val processor = {
+                val (idString, enumeratees, subflows) = controllers.Dispatcher.buildEnums(List(start), processorMap, None, "Parallel Processor - Unknown", true)
+                Enumeratee.mapM((data: DataPacket) => Future {
+                    Akka.system.actorSelection("user/TuktuMonitor") ! new AppInitPacket(idString, "Parallel Config Processor - Unknown", 1, true)
+                    data
+                }) compose enumeratees.head compose Enumeratee.onEOF { () =>
+                    Akka.system.actorSelection("user/TuktuMonitor") ! new AppMonitorUUIDPacket(idString, "done")
+                }
             }
             // Set up the actor that will execute this processor
             Akka.system.actorOf(Props(classOf[ParallelProcessorActor], processor))
         }
     }
 
-    override def processor(): Enumeratee[DataPacket, DataPacket] = Enumeratee.map(data => {
+    override def processor(): Enumeratee[DataPacket, DataPacket] = Enumeratee.mapM((data: DataPacket) => Future {
         // Send data to actors
         val futs = for (actor <- actors) yield (actor ? {
             if (sendOriginal) data else DataPacket(List())
@@ -425,7 +420,9 @@ class ParallelProcessor(resultName: String) extends BaseProcessor(resultName) {
             merger.invoke(mergerClass, data :: results).asInstanceOf[DataPacket]
         else
             merger.invoke(mergerClass, results).asInstanceOf[DataPacket]
-    })
+    }) compose Enumeratee.onEOF { () =>
+        actors.foreach { actor => actor ! new StopPacket }
+    }
 
 }
 
@@ -507,12 +504,12 @@ class ParallelConfigProcessor(resultName: String) extends BaseProcessor(resultNa
                 val inclMonitor = Enumeratee.mapM((data: DataPacket) => Future {
                     Akka.system.actorSelection("user/TuktuMonitor") ! new AppInitPacket(idString, "Parallel Config Processor - Unknown", 1, true)
                     data
-                }) compose enumeratee compose Enumeratee.onEOF(() =>
+                }) compose enumeratee compose Enumeratee.onEOF { () =>
                     Akka.system.actorSelection("user/TuktuMonitor") ! new AppMonitorUUIDPacket(idString, "done")
-                )
+                }
                 Enumerator({
                     if (sendOriginal) data else DataPacket(List())
-                }).through(inclMonitor).run(Iteratee.getChunks)
+                }).andThen(Enumerator.eof).through(inclMonitor).run(Iteratee.getChunks)
             }
         } flatMap (t => Future.sequence(t))) // Flatten Future[List[Future[T]]] => Future[List[T]]
 

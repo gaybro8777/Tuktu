@@ -38,12 +38,11 @@ case class treeNode(
 )
 
 object Dispatcher {
+    implicit val timeout = Timeout(Cache.getAs[Int]("timeout").getOrElse(5) seconds)
     /**
      * Flow monitoring enumeratee
      */
     def monitorEnumeratee(uuid: String, branch: String, mpType: MPType): Enumeratee[DataPacket, DataPacket] = {
-        implicit val timeout = Timeout(Cache.getAs[Int]("timeout").getOrElse(5) seconds)
-
         Enumeratee.mapM((data: DataPacket) => Future {
             Akka.system.actorSelection("user/TuktuMonitor") ! new MonitorPacket(mpType, uuid, branch, data.size)
             data
@@ -54,8 +53,6 @@ object Dispatcher {
      * Processor monitoring enumeratee
      */
     def processorMonitor(uuid: String, processor_id: String, mpType: MPType): Enumeratee[DataPacket, DataPacket] = {
-        implicit val timeout = Timeout(Cache.getAs[Int]("timeout").getOrElse(5) seconds)
-
         Enumeratee.mapM((data: DataPacket) => Future {
             Akka.system.actorSelection("user/TuktuMonitor") ! new ProcessorMonitorPacket(mpType, uuid, processor_id, data)
             data
@@ -85,7 +82,7 @@ object Dispatcher {
         // Keep track of all subflows
         val subflows = collection.mutable.ListBuffer.empty[ActorRef]
         // Keep track of instantiated processors
-        val instantiatedProcessors = collection.mutable.Map[String, Any]()
+        val instantiatedEnumeratees = collection.mutable.Map[String, Enumeratee[DataPacket, DataPacket]]()
 
         // Count how often a processor is a successor of the generator or a processor
         // and ignore all but the last EOF for each processor that has more than one predecessor
@@ -191,11 +188,10 @@ object Dispatcher {
                 // Add to subflow list
                 subflows += generator
 
-                // Instantiate the processor now
-                val iClazz = {
-                    // Check if we already converted this processor or not
-                    if (instantiatedProcessors.contains(procName)) instantiatedProcessors(procName)
-                    else {
+                // Create processor Enumeratee if it doesn't exist yet
+                val procEnum = instantiatedEnumeratees.getOrElseUpdate(procName, {
+                    // Instantiate new processor
+                    val iClazz = {
                         val ic = procClazz.getConstructor(
                                 classOf[ActorRef],
                                 classOf[String]
@@ -208,22 +204,20 @@ object Dispatcher {
                         val initMethod = procClazz.getMethods.find(m => m.getName == "initialize").get
                         initMethod.invoke(ic, pd.config)
 
-                        // Update mapping
-                        instantiatedProcessors += procName -> ic
-
+                        // Return instance
                         ic
                     }
-                }
 
-                // Add method to all our entries so far
-                val method = procClazz.getMethods.find(m => m.getName == "processor").get
-                val procEnum =
-                    // Check if this processor is one that is referenced by multiple subflows
-                    if (referenceCounts.contains(pd.id)) {
-                        // Prepend the Enumeratee which will ignore all EOFs but the last
-                        referenceCounts(pd.id) compose
-                            method.invoke(iClazz).asInstanceOf[Enumeratee[DataPacket, DataPacket]]
-                    } else method.invoke(iClazz).asInstanceOf[Enumeratee[DataPacket, DataPacket]]
+                    // Get Enumeratee from new processor
+                    val method = procClazz.getMethods.find(m => m.getName == "processor").get
+                    val methodEnum = method.invoke(iClazz).asInstanceOf[Enumeratee[DataPacket, DataPacket]]
+
+                    // Prepend with EOF counter if processor has more than one predecessor
+                    if (referenceCounts.contains(pd.id))
+                        referenceCounts(pd.id) compose methodEnum
+                    else
+                        methodEnum
+                })
 
                 if (logLevel == "all") {
                     accum compose
@@ -238,31 +232,30 @@ object Dispatcher {
                 }
             } else {
                 // 'Regular' processor
-                val iClazz = {
-                    // Check if we already converted this processor or not
-                    if (instantiatedProcessors.contains(procName)) instantiatedProcessors(procName)
-                    else {
+                // Create processor Enumeratee if it doesn't exist yet
+                val procEnum = instantiatedEnumeratees.getOrElseUpdate(procName, {
+                    // Instantiate new processor
+                    val iClazz = {
                         val ic = procClazz.getConstructor(classOf[String]).newInstance(pd.resultName)
 
                         // Initialize the processor first
                         val initMethod = procClazz.getMethods.find(m => m.getName == "initialize").get
                         initMethod.invoke(ic, pd.config)
-                        // Update mapping
-                        instantiatedProcessors += procName -> ic
 
+                        // Return instance
                         ic
                     }
-                }
 
-                // Get Enumeratee
-                val method = procClazz.getMethods.find(m => m.getName == "processor").get
-                val procEnum =
-                    // Check if this processor is one that is referenced by multiple subflows
-                    if (referenceCounts.contains(pd.id)) {
-                        // Prepend the Enumeratee which will ignore all EOFs but the last
-                        referenceCounts(pd.id) compose
-                            method.invoke(iClazz).asInstanceOf[Enumeratee[DataPacket, DataPacket]]
-                    } else method.invoke(iClazz).asInstanceOf[Enumeratee[DataPacket, DataPacket]]
+                    // Get Enumeratee from new processor
+                    val method = procClazz.getMethods.find(m => m.getName == "processor").get
+                    val methodEnum = method.invoke(iClazz).asInstanceOf[Enumeratee[DataPacket, DataPacket]]
+
+                    // Prepend with EOF counter if processor has more than one predecessor
+                    if (referenceCounts.contains(pd.id))
+                        referenceCounts(pd.id) compose methodEnum
+                    else
+                        methodEnum
+                })
 
                 val composition = if (logLevel == "all") {
                     accum compose
