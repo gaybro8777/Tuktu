@@ -32,8 +32,8 @@ class LREActor(parentActor: ActorRef, query: String, resultOnly: Boolean) extend
         {
             val fresult = lre.callLRE( query, resultOnly )
             fresult map{ result => result match{
-                    case value: JsValue => self ? LREResultPacket( value )
-                    case identifiers: Seq[String] => self ? LREIdsPacket( identifiers )
+                    case value: JsValue => self ? YouTubeResultPacket( value )
+                    case identifiers: Seq[String] => self ? YouTubeIdsPacket( identifiers )
                 }
             }            
         }
@@ -43,7 +43,7 @@ class LREActor(parentActor: ActorRef, query: String, resultOnly: Boolean) extend
             parentActor ! new StopPacket
             self ! PoisonPill
         }
-        case lipacket: LREIdsPacket => 
+        case lipacket: YouTubeIdsPacket => 
         {
             // Send back to parent for pushing into channel
             parentActor ! lipacket.ids.head
@@ -51,10 +51,10 @@ class LREActor(parentActor: ActorRef, query: String, resultOnly: Boolean) extend
             // Continue with remaining links if any
             lipacket.ids.tail.isEmpty match {
               case true => self ! new StopPacket
-              case false => self ! LREIdsPacket( lipacket.ids.tail )
+              case false => self ! YouTubeIdsPacket( lipacket.ids.tail )
             }
         }
-        case lrpacket: LREResultPacket =>
+        case lrpacket: YouTubeResultPacket =>
         {
             parentActor ! lrpacket
             self ! StopPacket
@@ -83,10 +83,10 @@ class LREGenerator( resultName: String, processors: List[Enumeratee[DataPacket, 
             val resultOnly = (config \ "resultOnly").asOpt[Boolean].getOrElse(true)
          
             // Create actor and kickstart
-            val lreActor = Akka.system.actorOf(Props(classOf[LREActor], self, query, resultOnly))
+            val lreActor = Akka.system.actorOf(Props(classOf[YouTubeActor], self, query, resultOnly))
             lreActor ! new InitPacket()
         }
         case id: String => channel.push(DataPacket(List(Map(resultName -> id))))
-        case lrpacket: LREResultPacket => channel.push(DataPacket(List(Map(resultName -> lrpacket.result))))
+        case lrpacket: YouTubeResultPacket => channel.push(DataPacket(List(Map(resultName -> lrpacket.result))))
     }
 }
