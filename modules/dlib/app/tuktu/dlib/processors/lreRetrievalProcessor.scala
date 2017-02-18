@@ -30,6 +30,7 @@ class LRERetrievalProcessor(resultName: String) extends BaseProcessor(resultName
     var service: String = _
     var identifiers: String = _
     var format: String = _
+    var head: Boolean = _
     
     override def initialize(config: JsObject) 
     {
@@ -37,6 +38,7 @@ class LRERetrievalProcessor(resultName: String) extends BaseProcessor(resultName
         service = (config \ "service").asOpt[String].getOrElse( "http://lredata.eun.org/" )
         identifiers = (config \ "identifiers").as[String]
         format = (config \ "format").asOpt[String].getOrElse("json")
+        head = (config \ "head").asOpt[Boolean].getOrElse( false )
     }
 
     override def processor(): Enumeratee[DataPacket, DataPacket] = Enumeratee.mapM((data: DataPacket) => 
@@ -44,7 +46,16 @@ class LRERetrievalProcessor(resultName: String) extends BaseProcessor(resultName
         val listfuture = data.data.map{ datum => 
             val request = evaluateTuktuString(service, datum) + "?format=" + evaluateTuktuString(format, datum) + "&ids=" + evaluateTuktuString(identifiers, datum)
             val futureresult = WS.url(request).get.map { response => response.json }
-            futureresult.map{ result => datum + (resultName -> result) }
+            futureresult.map( result => { 
+                if (head) 
+                {
+                    datum + (resultName -> result.as[List[JsObject]].head)
+                }
+                else 
+                {
+                    datum + (resultName -> result.as[List[JsObject]]) 
+                }
+            })
         }
         val futurelist = Future.sequence( listfuture )
         futurelist.map{ fl => DataPacket( fl ) }

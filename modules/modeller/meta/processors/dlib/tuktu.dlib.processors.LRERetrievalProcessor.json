@@ -1,6 +1,6 @@
 {
 	"name": "LRE Retrieval Processor",
-	"description": "Retrieves Learning Resource Exchange (LRE) metadata and paradata records based on their identifiers.",
+	"description": "Retrieves a list of Learning Resource Exchange (LRE) metadata and paradata records based on their identifiers.",
 	"class": "tuktu.dlib.processors.LRERetrievalProcessor",
 	"parameters": [
 		{
@@ -37,6 +37,13 @@
 					"type": "string",
 					"required": true,
 					"default": "json"
+				},
+				{
+					"name": "head",
+					"description": "only returns the first record of the result list (as a JSON object).",
+					"type": "boolean",
+					"required": true,
+					"default": "false"
 				}
 			]
 		}
