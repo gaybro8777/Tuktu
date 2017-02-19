@@ -1,31 +1,10 @@
 package tuktu.nosql.util
 
 import java.sql.Connection
-import java.util.UUID
-import java.util.concurrent.Semaphore
-
-import scala.Right
-import scala.collection.concurrent.TrieMap
-import scala.concurrent.ExecutionContext.Implicits.global
-
-import com.jolbox.bonecp.BoneCP
-import com.jolbox.bonecp.BoneCPConfig
-
-import anorm.Iteratees
-import anorm.NamedParameter
-import anorm.ParameterValue.toParameterValue
-import anorm.Row
-import anorm.RowParser
-import anorm.SQL
-import anorm.SqlParser
-import anorm.SqlStringInterpolation
-import anorm.sqlToSimple
-import play.api.libs.iteratee.Enumerator
-import akka.actor.Actor
-import scala.util.Random
+import com.zaxxer.hikari.{ HikariConfig, HikariDataSource }
+import anorm._
 import play.api.Play
-import com.zaxxer.hikari.HikariDataSource
-import com.zaxxer.hikari.HikariConfig
+import scala.Right
 
 /**
  * Keeps track of connections
@@ -36,7 +15,7 @@ object sql {
         user: String,
         password: String,
         driver: String)
-        
+
     val pools = collection.mutable.Map[ConnectionDefinition, HikariDataSource]()
     // Gets a single connection
     def getConnection(conn: ConnectionDefinition,
@@ -54,11 +33,11 @@ object sql {
             pools += conn -> ds
             ds.getConnection
         }
-        
+
         // Check if a pool exists
         if (pools.contains(conn)) pools(conn).getConnection
         else
-             // Create the pool and return one
+            // Create the pool and return one
             newConnection
     }
     // Releases a connection, and closes its BasicDataSource if it has no more active connections
@@ -71,12 +50,6 @@ object sql {
         case e: Option[_] => elem._1 -> e.getOrElse("NULL")
         case e: Any       => elem
     })
-
-    /**
-     * Query functions
-     */
-    def streamResult(query: String)(implicit conn: Connection): Enumerator[Row] =
-        Iteratees.from(SQL(query))
 
     val parser: RowParser[Map[String, Any]] =
         SqlParser.folder(Map.empty[String, Any]) { (map, value, meta) =>
