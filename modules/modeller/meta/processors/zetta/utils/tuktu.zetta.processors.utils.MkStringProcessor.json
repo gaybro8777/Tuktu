@@ -1,0 +1,44 @@
+{
+	"name": "MkString Processor",
+	"description": "Turns Sequence Fields into Strings.",
+	"class": "tuktu.zetta.processors.utils.MkStringProcessor",
+	"parameters": [
+		{
+			"name": "id",
+			"type": "string",
+			"required": true
+		},
+		{
+			"name": "result",
+			"type": "string",
+			"required": true
+		},
+		{
+			"name": "config",
+			"type": "object",
+			"required": true,
+			"parameters": [
+				{
+					"name": "fields",
+					"type": "array",
+					"description": "A selection of the Seq fields to turn into strings. If not set, all Seq fields are turned into strings.",
+					"required": false,
+					"parameters": [
+						{
+							"name": "",
+							"type": "string",
+							"required": true
+						}
+					]
+				},
+				{
+					"name": "separator",
+					"type": "string",
+					"description": "The separator character.",
+					"required": false,
+					"default": ";"
+				}
+			]
+		}
+	]
+}
