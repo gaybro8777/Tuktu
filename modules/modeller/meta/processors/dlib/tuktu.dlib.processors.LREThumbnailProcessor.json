@@ -1,0 +1,30 @@
+{
+	"name": "LRE Thumbnail Processor",
+	"description": "Derives the URL of an LRE thumbnail from its resource identifier.",
+	"class": "tuktu.dlib.processors.LREThumbnailProcessor",
+	"parameters": [
+		{
+			"name": "id",
+			"type": "string",
+			"required": true
+		},
+		{
+			"name": "result",
+			"type": "string",
+			"required": true
+		},
+		{
+			"name": "config",
+			"type": "object",
+			"required": true,
+			"parameters": [
+				{
+					"name": "field",
+					"description": "The field containing the LRE resource identifier.",
+					"type": "string",
+					"required": true
+				}
+			]
+		}
+	]
+}
