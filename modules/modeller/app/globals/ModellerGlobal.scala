@@ -44,7 +44,7 @@ class ModellerGlobal() extends TuktuGlobal() {
 
     def getDescriptors(files: List[Path]): Map[String, JsValue] = {
         (for {
-            file <- files
+            file <- files.filterNot(_.endsWith(".DS_Store"))
 
             (parseable, json) = try {
                 // Read file and try to parse as json
