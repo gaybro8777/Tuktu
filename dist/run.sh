@@ -9,7 +9,7 @@ fi
 if [[ "$_java" ]]; then
     version=$("$_java" -version 2>&1 | awk -F '"' '/version/ {print $2}')    
     if [[ "$version" > "1.8" ]]; then
-        bin/tuktu
+        bin/zettatuktu
     else         
         echo Please upgrade your Java version to atleast 8
     fi

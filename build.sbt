@@ -365,7 +365,7 @@ lazy val restapi = (project in file("modules/restapi"))
 lazy val root = project
     .in(file("."))
     .enablePlugins(PlayScala, LauncherJarPlugin)
-    .settings(name := "Tuktu")
+    .settings(name := "zettaTuktu")
     .settings(version := "1.3")
     .settings(scalaVersion := "2.11.8")
     .settings(resolvers ++= appResolvers)
