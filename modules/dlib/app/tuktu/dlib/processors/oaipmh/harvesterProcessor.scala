@@ -69,7 +69,7 @@ class HarvesterProcessor(genActor: ActorRef, resultName: String) extends BufferP
                 })
               // harvest
               listRecords( verb, params, datum )
-            }).flatMap { x => x }
+            }).flatten
         )
         
         futures.map {
@@ -122,25 +122,6 @@ class HarvesterProcessor(genActor: ActorRef, resultName: String) extends BufferP
                     case true => Seq(packetSenderActor ? (datum + ( resultName -> oaipmh.xml2jsObject( response.toString ) )))
                 }
             }
-        }
-    }
-}
-
-/**
- * Actor for forwarding data packets
- */
-class PacketSenderActor(remoteGenerator: ActorRef) extends Actor with ActorLogging {
-    remoteGenerator ! new InitPacket
-    
-    def receive() = {
-        case sp: StopPacket => {
-            remoteGenerator ! sp
-            self ! PoisonPill
-        }
-        case datum: Map[String, Any] => {
-            // Directly forward
-            remoteGenerator ! DataPacket(List(datum))
-            sender ! "ok"
         }
     }
 }
