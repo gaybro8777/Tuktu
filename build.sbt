@@ -171,6 +171,7 @@ lazy val zettaDependencies = Seq(
     ws,
     cache,
     "commons-io" % "commons-io" % "2.5",
+    "com.opencsv" % "opencsv" % "3.8",
     "org.json" % "json" % "20151123",
     "org.scalatestplus" %% "play" % "1.2.0" % "test"
 )
