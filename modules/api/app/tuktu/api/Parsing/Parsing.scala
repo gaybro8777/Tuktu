@@ -22,7 +22,7 @@ object ArithmeticParser {
 
     val White = WhitespaceApi.Wrapper {
         import fastparse.all._
-        NoTrace(" ".rep)
+        NoTrace((" " | "\t" | "\n").rep)
     }
     import fastparse.noApi._
     import White._
@@ -40,9 +40,9 @@ object ArithmeticParser {
     val factor: P[DoubleNode] = P(parens | number | functions)
 
     // List of allowed functions
-    val allowedFunctions = List("count", "avg", "median", "sum", "max", "min", "stdev")
+    val allowedFunctions = List("count", "distinct", "avg", "median", "sum", "max", "min", "stdev")
     // Function parameter
-    val string: P[String] = P("null" | ("\"" ~ ("\\\"" | CharPred(_ != '"')).rep ~ "\"")).!
+    val string: P[String] = P("null" | ("\"" ~ ("\\\"" | CharPred(c => c != '"')).rep ~ "\"")).!
         .map {
             case "null" => null
             case str    => Json.parse(str).as[String]
@@ -130,6 +130,8 @@ object ArithmeticParser {
                 vars.map(v => v._1 -> math.sqrt(v._2)).head._2
             case "count" =>
                 data.count { datum => fieldParser(datum, field).isDefined }
+            case "distinct" =>
+                data.map { datum => fieldParser(datum, field) }.filter { _.isDefined }.distinct.size
         }
     }
 
@@ -151,12 +153,8 @@ object PredicateParser {
     case class OrNode(children: Seq[BooleanNode]) extends BooleanNode
     case class NegateNode(or: BooleanNode) extends BooleanNode
 
-    val White = WhitespaceApi.Wrapper {
-        import fastparse.all._
-        NoTrace(" ".rep)
-    }
     import fastparse.noApi._
-    import White._
+    import ArithmeticParser.White._
 
     // Boolean literals
     val literal: P[BooleanLeaf] = P("!".rep.! ~ ("true" | "false").!)
