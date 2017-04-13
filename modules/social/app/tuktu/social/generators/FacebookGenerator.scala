@@ -65,7 +65,7 @@ case class CommentProcessing()
 /**
  * Gets all posts from a facebook page
  */
-class AsyncFacebookCollector(parentActor: ActorRef, fbClient: DefaultFacebookClient, updateTime: Long, fields: String, getComments: Boolean, runOnce: Boolean, flushInterval: Int, commentInterval: Int) extends Actor with ActorLogging {
+class AsyncFacebookCollector(parentActor: ActorRef, fbClient: DefaultFacebookClient, updateTime: Long, fields: String, getComments: Boolean, runOnce: Boolean, flushInterval: Int, commentInterval: Int, commentFrequency: Int) extends Actor with ActorLogging {
     implicit val timeout = Timeout(Cache.getAs[Int]("timeout").getOrElse(5) seconds)
     
     // Set up the author fetching actor
@@ -106,10 +106,22 @@ class AsyncFacebookCollector(parentActor: ActorRef, fbClient: DefaultFacebookCli
             }
             
             // Forward them
-            commentsActor.get ! new FBCommentDataRequest(eligiblePosts toMap)
+            commentsActor.get ! new FBCommentDataRequest(eligiblePosts map {p =>
+                p._1 -> (p._2 - "tuktu_fetch_count")
+            } toMap)
             
-            // Remove them all
-            processedPosts --= eligiblePosts.keys
+            // Update posts to repeat fetching comments
+            eligiblePosts.foreach {post =>
+                // Check if this one contains our counter
+                val newPost = (post._2 \ "tuktu_fetch_count").asOpt[Int] match {
+                    case None => post._2 ++ Json.obj("tuktu_fetch_count" -> 1)
+                    case Some(fc) => post._2 ++ Json.obj("tuktu_fetch_count" -> (fc + 1))
+                }
+                // Check if it's within the boundary
+                if ((newPost \ "tuktu_fetch_count").as[Int] >= commentFrequency)
+                    processedPosts -= post._1
+                else processedPosts += post._1 -> newPost
+            }
         }
         case fa: FlushAuthors => {
             // Check if there is even data
@@ -392,6 +404,7 @@ class FacebookGenerator(resultName: String, processors: List[Enumeratee[DataPack
             // Get flush and comment intervals
             val flushInterval = (config \ "flush_interval").asOpt[Int].getOrElse(60)
             val commentInterval = (config \ "comment_interval").asOpt[Int].getOrElse(3600)
+            val commentFrequency = (config \ "comment_frequency").asOpt[Int].getOrElse(5)
             
             // Set up RestFB
             val fbClient = new DefaultFacebookClient(aToken, Version.VERSION_2_8)
@@ -400,31 +413,35 @@ class FacebookGenerator(resultName: String, processors: List[Enumeratee[DataPack
             val filters = Common.getFilters(config)
             val users = filters("userids")
                 .asInstanceOf[Array[String]].map(_ + "/feed")
-
-            // Check period, if given
-            val interval = (config \ "interval").asOpt[JsObject]
-            var (startTime: Option[Long], endTime: Option[Long]) = interval match {
-                case Some(intvl) => {
-                    ((intvl \ "start").asOpt[Long],
-                        (intvl \ "end").asOpt[Long])
+                
+            // Stop if there are no users
+            if (users.size == 0) self ! new StopPacket
+            else {
+                // Check period, if given
+                val interval = (config \ "interval").asOpt[JsObject]
+                var (startTime: Option[Long], endTime: Option[Long]) = interval match {
+                    case Some(intvl) => {
+                        ((intvl \ "start").asOpt[Long],
+                            (intvl \ "end").asOpt[Long])
+                    }
+                    case None => (None, None)
                 }
-                case None => (None, None)
+    
+                /**
+                 * See what we need to do.
+                 * - If only a start-time is given, we need to perpetually fetch from that time on.
+                 * - If only an end-time is given, we need to fetch everything until that time and then stop. If the end-time
+                 *       is in the future, we need to continue to watch FB until the end-time passes.
+                 * - If both are given we need to fetch until the end-time but not go back beyond the start-time.
+                 * - If none are given, we start to perpetually fetch from now on.
+                 */
+                val now = System.currentTimeMillis / 1000
+                if (startTime == None && endTime == None) startTime = Some(now)
+    
+                // Merge URLs and send to periodic actor
+                pollerActor = Akka.system.actorOf(Props(classOf[AsyncFacebookCollector], self, fbClient, updateTime, fields, getComments, runOnce, flushInterval, commentInterval, commentFrequency))
+                pollerActor ! new FBDataRequest(users.toList, startTime, endTime)
             }
-
-            /**
-             * See what we need to do.
-             * - If only a start-time is given, we need to perpetually fetch from that time on.
-             * - If only an end-time is given, we need to fetch everything until that time and then stop. If the end-time
-             *       is in the future, we need to continue to watch FB until the end-time passes.
-             * - If both are given we need to fetch until the end-time but not go back beyond the start-time.
-             * - If none are given, we start to perpetually fetch from now on.
-             */
-            val now = System.currentTimeMillis / 1000
-            if (startTime == None && endTime == None) startTime = Some(now)
-
-            // Merge URLs and send to periodic actor
-            pollerActor = Akka.system.actorOf(Props(classOf[AsyncFacebookCollector], self, fbClient, updateTime, fields, getComments, runOnce, flushInterval, commentInterval))
-            pollerActor ! new FBDataRequest(users.toList, startTime, endTime)
         }
         case data: ResponsePacket => channel.push(DataPacket(List(Map(resultName -> data.json))))
     }

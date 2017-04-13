@@ -42,7 +42,7 @@ lazy val apiDependencies = Seq(
     "org.scalatestplus" %% "play" % "1.2.0" % "test",
     "org.apache.hadoop" % "hadoop-client" % "2.7.3" excludeAll(ExclusionRule(organization = "org.slf4j")),
     "com.netaporter" %% "scala-uri" % "0.4.7",
-    "com.enragedginger" %% "akka-quartz-scheduler" % "1.3.0-akka-2.3.x",
+    "com.enragedginger" %% "akka-quartz-scheduler" % "1.4.0-akka-2.3.x",
     "org.apache.commons" % "commons-collections4" % "4.1",
     "com.lihaoyi" %% "fastparse" % "0.4.1"
 )
@@ -54,6 +54,7 @@ lazy val nlpDependencies = Seq(
     "org.apache.opennlp" % "opennlp-tools" % "1.5.3",
     "com.github.rholder" % "snowball-stemmer" % "1.3.0.581.1",
     "com.vdurmont" % "emoji-java" % "3.1.3"
+    //"fasttext" % "fasttext" % "0.0.1-SNAPSHOT" // Run mvn install from https://github.com/ivanhk/fastText_java
 )
 
 lazy val csvDependencies = Seq(

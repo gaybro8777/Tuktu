@@ -2,7 +2,7 @@ package tuktu.test.api
 
 import play.api.libs.json._
 import tuktu.api.Parsing._
-import scala.util.Random
+import scala.util.{ Random, Try }
 import org.scalatest._
 import org.scalatestplus.play.PlaySpec
 import Matchers._
@@ -157,6 +157,9 @@ class ParsingTests extends PlaySpec {
         "support null" in {
             PredicateParser("\"ABC\" == null", datum) should be(false)
             PredicateParser("null != null", datum) should be(false)
+            Try { PredicateParser.expr.parse("containsSubstring(null, null, null)") }.isSuccess should be(true)
+            Try { PredicateParser.expr.parse("size(null) == 17") }.isSuccess should be(true)
+            Try { PredicateParser.expr.parse("isNull(toLowerCase(null))") }.isSuccess should be(true)
         }
 
         "support operator priority" in {
@@ -174,6 +177,12 @@ class ParsingTests extends PlaySpec {
             PredicateParser("((\"asd\" == \"asd\") && (false == false) == true)", datum) should be(true)
         }
 
+        "support string functions" in {
+            PredicateParser("toUpperCase(\"abc\") == \"ABC\"", datum) should be(true)
+            PredicateParser("toLowerCase(\"ABC\") == \"abc\"", datum) should be(true)
+            PredicateParser("toLowerCase(toLowerCase(toUpperCase(\"AbC\"))) == \"abc\"", datum) should be(true)
+        }
+
         "support arithmetic functions" in {
             PredicateParser("size(\"null\") > 0", datum) should be(true)
             PredicateParser("size(\"null\") <= 2", datum) should be(true)
@@ -183,7 +192,7 @@ class ParsingTests extends PlaySpec {
             PredicateParser("size(\"String\") == 8", datum) should be(true)
         }
 
-        "return correct results for its functions" in {
+        "support boolean functions" in {
             // isNull
             PredicateParser("isNull(\"null.1\")", datum) should be(true)
             PredicateParser("isNull(\"null.2\")", datum) should be(true)
@@ -217,6 +226,7 @@ class ParsingTests extends PlaySpec {
 
             // containsSubstring
             PredicateParser("containsSubstring(\"myString\", \"string\")", datum) should be(false)
+            PredicateParser("containsSubstring(toLowerCase(\"myString\"), toLowerCase(\"strinG\"))", datum) should be(true)
             PredicateParser("containsSubstring(\"myString\", \"String\")", datum) should be(true)
             PredicateParser("containsSubstring(\"String\", \"myString\")", datum) should be(false)
 
