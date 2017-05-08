@@ -49,12 +49,13 @@ lazy val apiDependencies = Seq(
 
 lazy val nlpDependencies = Seq(
     cache,
+    "edu.stanford.nlp" % "stanford-parser" % "3.7.0",
     "org.scalatestplus" %% "play" % "1.2.0" % "test",
     "com.optimaize.languagedetector" % "language-detector" % "0.6",
     "org.apache.opennlp" % "opennlp-tools" % "1.5.3",
     "com.github.rholder" % "snowball-stemmer" % "1.3.0.581.1",
-    "com.vdurmont" % "emoji-java" % "3.1.3"
-    //"fasttext" % "fasttext" % "0.0.1-SNAPSHOT" // Run mvn install from https://github.com/ivanhk/fastText_java
+    "com.vdurmont" % "emoji-java" % "3.1.3",
+    "com.google.guava" % "guava" % "21.0"
 )
 
 lazy val csvDependencies = Seq(
@@ -70,7 +71,7 @@ lazy val socialDependencies = Seq(
     "org.scalatestplus" %% "play" % "1.2.0" % "test",
     "org.twitter4j" % "twitter4j-core" % "4.0.4",
     "org.twitter4j" % "twitter4j-stream" % "4.0.4",
-    "com.github.scribejava" % "scribejava-apis" % "3.2.0",
+    "com.github.scribejava" % "scribejava-apis" % "4.1.0",
     "com.restfb" % "restfb" % "1.33.0"
 )
 
@@ -105,11 +106,12 @@ lazy val mlDependencies = Seq(
 lazy val dlDependencies = Seq(
     cache,
     "org.scalanlp" %% "breeze" % "0.10",
-    "org.deeplearning4j" % "deeplearning4j-core" % "0.6.0" excludeAll(ExclusionRule(organization = "org.spark-project"),ExclusionRule(organization = "org.spark-project.akka"), ExclusionRule(organization = "io.netty"), ExclusionRule(organization = "com.typesafe.akka"), ExclusionRule(artifact = "akka-remote")),
-    "org.deeplearning4j" % "deeplearning4j-nlp" % "0.6.0" excludeAll(ExclusionRule(organization = "org.spark-project"),ExclusionRule(organization = "org.spark-project.akka"), ExclusionRule(organization = "io.netty"), ExclusionRule(organization = "com.typesafe.akka"), ExclusionRule(artifact = "akka-remote"), ExclusionRule("org.deeplearning4j","spark")),
-    "org.nd4j" % "nd4j-native-platform" % "0.6.0",
-    "org.nd4j" % "nd4j-native" % "0.6.0",
-    "org.nd4j" % "nd4j-native" % "0.6.0" classifier "windows-x86_64",
+    "org.deeplearning4j" % "deeplearning4j-core" % "0.8.0" excludeAll(ExclusionRule(organization = "org.spark-project"),ExclusionRule(organization = "org.spark-project.akka"), ExclusionRule(organization = "io.netty"), ExclusionRule(organization = "com.typesafe.akka"), ExclusionRule(artifact = "akka-remote")),
+    "org.deeplearning4j" % "deeplearning4j-nlp" % "0.8.0" excludeAll(ExclusionRule(organization = "org.spark-project"),ExclusionRule(organization = "org.spark-project.akka"), ExclusionRule(organization = "io.netty"), ExclusionRule(organization = "com.typesafe.akka"), ExclusionRule(artifact = "akka-remote"), ExclusionRule("org.deeplearning4j","spark")),
+    "org.deeplearning4j" % "deeplearning4j-modelimport" % "0.8.0",
+    "org.nd4j" % "nd4j-native-platform" % "0.8.0",
+    "org.nd4j" % "nd4j-native" % "0.8.0",
+    "org.nd4j" % "nd4j-native" % "0.8.0" classifier "windows-x86_64",
     "org.scalatestplus" %% "play" % "1.2.0" % "test"
 )
 
