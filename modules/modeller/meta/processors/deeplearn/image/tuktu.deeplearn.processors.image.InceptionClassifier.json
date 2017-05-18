@@ -1,7 +1,7 @@
 {
-	"name": "Image Recognition VGG16",
-	"description": "Recognizes what is being represented on an image using the VGG16 model, consisting of 1000 ImageNet labels.",
-	"class": "tuktu.deeplearn.processors.image.VGG16Classifier",
+	"name": "Image Recognition InceptionV3",
+	"description": "Recognizes what is being represented on an image using the InceptionV3 model, consisting of 1000 ImageNet labels.",
+	"class": "tuktu.deeplearn.processors.image.InceptionClassifier",
 	"parameters": [
 		{
 			"name": "id",

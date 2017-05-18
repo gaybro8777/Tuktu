@@ -73,10 +73,60 @@
 					"required": true
 				},
 				{
-					"name": "board",
-					"description": "The name of the board. Should be <username>/<board>.",
-					"type": "string",
-					"required": true
+					"name": "boards",
+					"description": "The name of the boards. Should be <username>/<board>.",
+					"type": "array",
+					"required": true,
+					"parameters": [
+						{
+							"name": "",
+							"description": "Board location, should be <username>/<board>.",
+							"type": "string",
+							"required": true
+						}
+					]
+				},
+				{
+					"name": "interval",
+					"description": "Time interval to collect data for.",
+					"type": "object",
+					"required": false,
+					"parameters": [
+						{
+							"name": "start",
+							"description": "Timestamp of start time of time interval to collect data for. Can be left empty. If a start-time is given, everything from that time on will be fetched. If it is omitted the current time is assumed.",
+							"type": "long",
+							"required": false
+						},
+						{
+							"name": "end",
+							"description": "Timestamp of end time of time interval to collect data for. Can be left empty. If an end-time is given, everything until that time will be fetched. If it is omitted, no end time is assumed and everything will be fetched perpetually.",
+							"type": "long",
+							"required": false
+						}
+					]
+				},
+				{
+					"name": "max_attempts",
+					"description": "Maximum number of failed attempts for a specific board before giving up on it.",
+					"type": "int",
+					"required": false,
+					"default": 3
+				},
+				{
+					"name": "update_time",
+					"label": "Update frequency",
+					"description": "Time in seconds between requests, if applicable.",
+					"type": "int",
+					"required": false,
+					"default": 5
+				},
+				{
+					"name": "get_extended_user",
+					"description": "Whether or not to get extended author profiles. Fetches a bit more fields on the author of a pin, but costs another request for every pin",
+					"type": "boolean",
+					"required": false,
+					"default": false
 				}
 			]
 		}

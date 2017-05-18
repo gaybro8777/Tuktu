@@ -1,20 +1,16 @@
 package tuktu.deeplearn.processors.image
 
-import scala.concurrent.Future
-
 import play.api.libs.iteratee.Enumeratee
+import tuktu.api.DataPacket
 import play.api.libs.json.JsObject
 import tuktu.api.BaseProcessor
-import tuktu.api.DataPacket
-import scala.concurrent.ExecutionContext.Implicits.global
-import tuktu.api.utils
 import java.net.URL
-import tuktu.deeplearn.models.image.VGG16
+import scala.concurrent.Future
+import tuktu.api.utils
+import tuktu.deeplearn.models.image.InceptionV3
+import scala.concurrent.ExecutionContext.Implicits.global
 
-/**
- * Classifies an image to find what is represented on it using VGG16 model
- */
-class VGG16Classifier(resultName: String) extends BaseProcessor(resultName) {
+class InceptionClassifier(resultName: String) extends BaseProcessor(resultName) {
     var localRemote = "remote"
     var imageName: String = _
     var n: Int = _
@@ -32,16 +28,16 @@ class VGG16Classifier(resultName: String) extends BaseProcessor(resultName) {
         useCategories = (config \ "use_categories").asOpt[Boolean].getOrElse(false)
         
         // Load model
-        VGG16.load
+        InceptionV3.load
     }
     
     def getImageLabels(uri: String) = {
-        val labels = VGG16.classifyFile(uri, if (flatten) 1 else n, useCategories)
+        val labels = InceptionV3.classifyFile(uri, if (flatten) 1 else n, useCategories)
         if (flatten) labels.head._1 else labels
     }
     
     def getImageLabels(uri: URL) = {
-        val labels = VGG16.classifyFile(uri, if (flatten) 1 else n, useCategories)
+        val labels = InceptionV3.classifyFile(uri, if (flatten) 1 else n, useCategories)
         if (flatten) labels.head._1 else labels
     }
     
