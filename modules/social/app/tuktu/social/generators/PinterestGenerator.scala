@@ -1,3 +1,4 @@
+
 package tuktu.social.generators
 
 import com.github.scribejava.apis.PinterestApi
@@ -27,6 +28,7 @@ import org.joda.time.format.DateTimeFormat
 import scala.concurrent.duration.DurationInt
 import scala.concurrent.ExecutionContext.Implicits.global
 import akka.actor.PoisonPill
+import play.api.Logger
 
 case class PinterestRequest(
         board: String,
@@ -47,7 +49,7 @@ class AsyncPinterestActor(parent: ActorRef, client: OAuth20Service, token: OAuth
     val timeformat = DateTimeFormat.forPattern("yyyy-MM-dd'T'HH:mm:ss")
     // If we need to get extended author, set up actor
     val authorActor = if (getExtendedAuthor)
-            Some(Akka.system.actorOf(Props(classOf[AuthorFetcherActor], self, client, token)))
+            Some(Akka.system.actorOf(Props(classOf[AuthorFetcherActor], parent, client, token)))
         else None
     
     def receive() = {
@@ -73,7 +75,7 @@ class AsyncPinterestActor(parent: ActorRef, client: OAuth20Service, token: OAuth
                     
                     // See if we need to get extended author profiles or not
                     authorActor match {
-                        case Some(a) => a ! new PinterestObjects(sd)
+                        case Some(a) => a ! new AuthorPins(sd)
                         case None => parent ! new PinterestObjects(sd)
                     }
                     
@@ -116,9 +118,12 @@ class AsyncPinterestActor(parent: ActorRef, client: OAuth20Service, token: OAuth
                     case None => self ! PoisonPill
                 }
             }
-            else
+            else {
+                Logger.warn("Pinterest generator got a non-OK response for board " + pr.board + " - "
+                        + response.getCode + "\r\n" + response.getBody)
                 // We can go again
                 self ! new PinterestRequest(pr.board, pr.cursor, pr.attempt + 1, pr.afterTime, pr.afterBackTrack)
+            }
         }
     }
 }
@@ -138,9 +143,7 @@ class AuthorFetcherActor(parent: ActorRef, client: OAuth20Service, token: OAuth2
                     val data = (json \ "data").as[JsObject]
                     // Merge back in the original pin
                     pin.deepMerge(Json.obj(
-                            "data" -> Json.obj(
-                                    "creator" -> data
-                             )
+                        "creator" -> data
                     ))
                 } else null
             } filter( _ != null)
@@ -203,7 +206,7 @@ class PinterestGenerator(resultName: String, processors: List[Enumeratee[DataPac
                 if (3600 / ut * boards.size > 1000)
                     Math.ceil(3.6 * boards.size * {
                         if (getExtendedAuthor) 2 else 1
-                    })
+                    }).toInt
                 else ut
             }
             
