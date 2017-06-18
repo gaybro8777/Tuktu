@@ -57,6 +57,41 @@ class Word2Vec() extends BaseModel {
             allWords.mean(0)
         } else Nd4j.create((0 to layerSize - 1).map(_ => 0.0).toArray)
     }
+    
+    /**
+     * Classifies a set of input words to candidate word lists based on cosine similarity to find the closest candidate.
+     * Every element of the candidateWordClasses is a Seq[String] and is a set of words that together shape the class.
+     */
+    def simpleNearestWordsClassifier(inputWords: List[String], candidateWordClasses: List[List[String]]) = {
+        val inputAverage = getAverageDocVector(inputWords, None)
+        val scores = candidateWordClasses.zipWithIndex.map {wordClass =>
+            val candidateAverage = getAverageDocVector(wordClass._1, None)
+            (wordClass._2, Transforms.cosineSim(inputAverage, candidateAverage))
+        }
+        scores.sortWith((a,b) => a._2 > b._2)
+    }
+    
+    /**
+     * This classifier is similar to the one above but instead of looking at averaged word vectors, it looks at vectors word-by-word
+     * and sees if there is a close-enough overlap between one or more candidate set words and the sentence's words.
+     */
+    def simpleWordOverlapClassifier(inputWords: List[String], candidateWordsClasses: List[List[INDArray]], cutoff: Double = 0.7) = {
+        // Conver input words
+        val vectors = inputWords.filter(wordMap.contains(_)).map(wordMap(_))
+        // Go over the candidate sets and match
+        candidateWordsClasses.zipWithIndex.map {wordClass =>
+            // Average of all the word similarities
+            val similarities = for {
+                vector <- vectors
+                word <- wordClass._1
+                similarity = Transforms.cosineSim(vector, word)
+                if (similarity >= cutoff)
+            } yield similarity
+            
+            // See if we found any
+            if (similarities.isEmpty) (wordClass._2, 0.0) else (wordClass._2, similarities.sum / similarities.size.toDouble)
+        } sortWith((a,b) => a._2 > b._2)
+    }
 
     /**
      * Calculate top nearest words to the given list of words.
@@ -144,7 +179,7 @@ class Word2Vec() extends BaseModel {
                         new GZIPInputStream(new FileInputStream(modelFile))
                     else
                         new FileInputStream(modelFile)
-                }))
+                }, "utf8"))
 
             Stream.continually(br.readLine()).takeWhile(_ != null).foreach { line =>
                 {
