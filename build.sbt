@@ -15,6 +15,7 @@ mappings in Universal ++=
 
 lazy val appResolvers = Seq(
     "JCenter" at "http://jcenter.bintray.com/",
+    "lightshed-maven" at "http://dl.bintray.com/content/lightshed/maven",
     "Local Maven Repository" at "file:///"+Path.userHome.absolutePath+"/.m2/repository"
 )
 
@@ -100,6 +101,8 @@ lazy val mlDependencies = Seq(
     "com.thoughtworks.xstream" % "xstream" % "1.4.8",
     "com.github.haifengl" % "smile-core" % "1.3.1",
     "org.scalanlp" %% "breeze" % "0.10",
+	"org.jblas" % "jblas" % "1.2.4",
+	"de.bwaldvogel" % "liblinear" % "2.11" withSources() withJavadoc(),
     "org.scalatestplus" %% "play" % "1.2.0" % "test"
 )
 
@@ -113,7 +116,8 @@ lazy val dlDependencies = Seq(
     "org.nd4j" % "nd4j-native" % "0.8.0",
     //"org.nd4j" % "nd4j-native" % "0.8.0" classifier "linux-x86_64",
     "org.nd4j" % "nd4j-native" % "0.8.0" classifier "windows-x86_64",
-    "org.scalatestplus" %% "play" % "1.2.0" % "test"
+    "org.scalatestplus" %% "play" % "1.2.0" % "test",
+    "org.tensorflow" % "tensorflow" % "1.2.0"
 )
 
 lazy val dlibDependencies = Seq(
@@ -157,7 +161,8 @@ lazy val coreDependencies = Seq(
     "org.apache.commons" % "commons-math3" % "3.5",
     "org.reflections" % "reflections" % "0.9.10",
     "com.github.lucarosellini.rJava" % "JRIEngine" % "0.9-7",
-    "com.github.lucarosellini.rJava" % "JRI" % "0.9-7"
+    "com.github.lucarosellini.rJava" % "JRI" % "0.9-7",
+    "ch.lightshed" %% "courier" % "0.1.4"
 )
 
 lazy val tuktuDBDependencies = Seq(
@@ -375,6 +380,7 @@ lazy val root = project
     .settings(scalaVersion := "2.11.8")
     .settings(resolvers ++= appResolvers)
     .settings(libraryDependencies ++= coreDependencies)
+	.settings(dependencyOverrides ++= Set("org.jblas" % "jblas" % "1.2.4"))
     .settings(EclipseKeys.skipParents in ThisBuild := false)
     .aggregate(api, aws, restapi, nlp, csv, dfs, dl, social, nosql, ml, web, tuktudb, crawler, modeller, viz, dlib, zetta)
     .dependsOn(api, aws, restapi, nlp, csv, dfs, dl, social, nosql, ml, web, tuktudb, crawler, modeller, viz, dlib, zetta)

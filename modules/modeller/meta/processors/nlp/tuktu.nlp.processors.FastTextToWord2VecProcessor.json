@@ -1,7 +1,7 @@
 {
-	"name": "Read a pre-trained word2vec from Google",
-	"description": "Word2Vec trained by Google's word2vec can be read by this processor.",
-	"class": "tuktu.nlp.processors.ReadGoogleWord2VecProcessor",
+	"name": "FastText to Word2Vec Processor",
+	"description": "Loads pre-trained fastText model and transfers the word vectors word-by-word to a target word2vec model.", 
+	"class": "tuktu.nlp.processors.FastTextToWord2VecProcessor",
 	"parameters": [
 		{
 			"name": "id",
@@ -20,13 +20,13 @@
 			"parameters": [
 				{
 					"name": "model_name",
-					"description": "Name of the model to be deserialized.",
+					"description": "Name of the target word2vec model that will be transferred to.",
 					"type": "string",
 					"required": true
 				},
 				{
 					"name": "file_name",
-					"description": "The file name to deserialize from.",
+					"description": "The file name to deserialize the fastText model from.",
 					"type": "string",
 					"required": true
 				},
@@ -40,13 +40,6 @@
 				{
 					"name": "wait_for_load",
 					"description": "If set to true, processing only continues after the model has been loaded into memory (sync). If false, processing continues immediately, not knowing when the model has been materialized.",
-					"type": "boolean",
-					"required": false,
-					"default": false
-				},
-				{
-					"name": "binary",
-					"description": "If set to true, load a binary word2vec file.",
 					"type": "boolean",
 					"required": false,
 					"default": false

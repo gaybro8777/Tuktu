@@ -73,6 +73,28 @@ class FastTextWrapper(lr: Double, lrUpdateRate: Int, dim: Int, ws: Int, epoch: I
 		fasttext.setArgs(saveArgs)
         fasttext.saveModel
     }
+	
+	/**
+     * This classifier is similar to the one above but instead of looking at averaged word vectors, it looks at vectors word-by-word
+     * and sees if there is a close-enough overlap between one or more candidate set words and the sentence's words.
+     */
+    def simpleWordOverlapClassifier(inputWords: List[String], candidateWordsClasses: Seq[Seq[Array[Double]]], cutoff: Double = 0.225) = {
+        // Conver input words
+        val vectors = inputWords.map(getWordVector)
+        // Go over the candidate sets and match
+        candidateWordsClasses.zipWithIndex.map {wordClass =>
+            // Average of all the word similarities
+            val similarities = for {
+                vector <- vectors
+                word <- wordClass._1
+                similarity = CosineSimilarity.cosineSimilarity(vector, word)
+                if (similarity >= cutoff)
+            } yield similarity
+            
+            // See if we found any
+            if (similarities.isEmpty) (wordClass._2, 0.0) else (wordClass._2, similarities.sum / similarities.size.toDouble)
+        } sortWith((a,b) => a._2 > b._2)
+    }
 		
     override def deserialize(filename: String) = fasttext.loadModel(filename)
 }
@@ -85,7 +107,10 @@ object FastTextCache {
         .build(
             new CacheLoader[String, FastTextWrapper]() {
                 def load(modelName: String) = {
-                    val model = new FastTextWrapper(0.05, 100 , 100, 5, 5, 5, 0, 5, 1, "ns", "sg", 2000000, 3, 6 , 1, 1e-4, "__label__", "")
+                    val model = new FastTextWrapper(0.05, 100 , 100, 5, 5, 5, 0, 5, 1, "ns", "sg", 2000000, 3, 6 , {
+                        Runtime.getRuntime().availableProcessors /
+                        Play.current.configuration.getLong("tuktu.nlp.fasttext.max_cache_size").getOrElse(4L).toInt
+                    }, 1e-4, "__label__", "")
                     model.deserialize(modelName)
                     model
                 }

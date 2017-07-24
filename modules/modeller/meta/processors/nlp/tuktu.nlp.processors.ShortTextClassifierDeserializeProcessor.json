@@ -1,7 +1,7 @@
 {
-	"name": "Read a pre-trained word2vec from Google",
-	"description": "Word2Vec trained by Google's word2vec can be read by this processor.",
-	"class": "tuktu.nlp.processors.ReadGoogleWord2VecProcessor",
+	"name": "Short Text Classification Deserialization Processor",
+	"description": "Deserializes a short text classification model.",
+	"class": "tuktu.nlp.processors.ShortTextClassifierDeserializeProcessor",
 	"parameters": [
 		{
 			"name": "id",
@@ -45,11 +45,16 @@
 					"default": false
 				},
 				{
-					"name": "binary",
-					"description": "If set to true, load a binary word2vec file.",
-					"type": "boolean",
-					"required": false,
-					"default": false
+					"name": "min_count",
+					"type": "double",
+					"required": true,
+					"description": "The minimum fraction a feature should be present."
+				},
+				{
+					"name": "similarity_threshold",
+					"type": "double",
+					"required": true,
+					"description": "The threshold determining when a seed words is similar enough to a non-seed word using Cosine Similarity."
 				}
 			]
 		}

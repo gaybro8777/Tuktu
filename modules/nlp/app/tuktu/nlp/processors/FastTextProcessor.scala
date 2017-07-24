@@ -1,17 +1,21 @@
 package tuktu.nlp.processors
 
+import scala.concurrent.ExecutionContext.Implicits.global
+import scala.concurrent.Future
+
+import org.nd4j.linalg.api.ndarray.INDArray
+import org.nd4j.linalg.factory.Nd4j
+import org.nd4j.linalg.ops.transforms.Transforms
+
 import play.api.libs.iteratee.Enumeratee
-import tuktu.api.DataPacket
 import play.api.libs.json.JsObject
 import tuktu.api.BaseProcessor
-import scala.concurrent.Future
-import scala.concurrent.ExecutionContext.Implicits.global
-import tuktu.nlp.models.FastTextWrapper
+import tuktu.api.DataPacket
 import tuktu.api.utils
 import tuktu.nlp.models.FastTextCache
-import org.nd4j.linalg.factory.Nd4j
-import org.nd4j.linalg.api.ndarray.INDArray
-import org.nd4j.linalg.ops.transforms.Transforms
+import tuktu.nlp.models.FastTextWrapper
+import play.api.libs.json.JsArray
+import play.api.libs.json.Json
 
 class FastTextProcessor(resultName: String) extends BaseProcessor(resultName) {
     //val models = collection.mutable.Map.empty[String, FastTextWrapper]
@@ -173,6 +177,85 @@ class SimpleFastTextClassifierProcessor(resultName: String) extends BaseProcesso
             
             // Append
             datum + (resultName -> {
+                // Flatten if we have to
+                if (flatten) scores.head._1 else scores.take(top)
+            })
+        })
+    })
+}
+
+/**
+ * This classifier is similar to the one above but instead of looking at averaged word vectors, it looks at vectors word-by-word
+ * and sees if there is a close-enough overlap between one or more candidate set words and the sentence's words.
+ */
+class FastTextWordBasedClassifierProcessor(resultName: String) extends BaseProcessor(resultName) {
+    var field: String = _
+    val candidateVectors = collection.mutable.ListBuffer.empty[List[Array[Double]]]
+    var modelName: String = _
+    var top: Int = _
+    var flatten: Boolean = _
+    var cutoff: String = _
+    var candidates: List[List[String]] = _
+    var candidateField: Option[String] = _
+
+    override def initialize(config: JsObject) {
+        field = (config \ "data_field").as[String]
+        candidates = (config \ "candidates").as[List[List[String]]].map(_.map(_.toLowerCase))
+        top = (config \ "top").asOpt[Int].getOrElse(1)
+        flatten = (config \ "flatten").asOpt[Boolean].getOrElse(true)
+        cutoff = (config \ "cutoff").asOpt[String].getOrElse("0.7")
+        modelName = (config \ "model_name").as[String]
+        
+        // Overwrites candidate vectors at runtime if given
+        candidateField = (config \ "candidate_field").asOpt[String]
+        
+        super.initialize(config)
+    }
+    
+    def generateCandidates(wordGroups: Seq[Seq[String]], model: FastTextWrapper) = {
+        wordGroups.map {words =>
+            words.map {word =>
+                model.getWordVector(word)
+            }
+        }
+    }
+
+    override def processor(): Enumeratee[DataPacket, DataPacket] = Enumeratee.mapM((data: DataPacket) => Future {
+        new DataPacket(data.data.map {datum =>
+            datum + (resultName -> {
+                // Initialize model and candidate vectors
+                val model = FastTextCache.getModel(utils.evaluateTuktuString(modelName, datum))
+                if (candidateVectors.isEmpty) {
+                    candidates.foreach {candidateSet =>
+                        // Compute the vectors for each candidate
+                        candidateVectors += candidateSet.map(model.getWordVector)
+                    }
+                }
+                // Get cutoff
+                val newCutoff = utils.evaluateTuktuString(cutoff, datum).toDouble
+                // Get candidate vectors
+                val newCandidates = candidateField match {
+                    case Some(field) => datum(field) match {
+                        case f: Array[Array[String]] => generateCandidates(f.toSeq.map(_.toSeq), model)
+                        case f: Seq[Seq[String]] => generateCandidates(f, model)
+                        case f: JsArray => generateCandidates(f.as[Seq[Seq[String]]], model)
+                        case f: String =>
+                            // By default we assume JSON
+                            generateCandidates(Json.parse(f).as[Seq[Seq[String]]], model)
+                        case _ => Nil // Can't continue
+                    }
+                    case None => candidateVectors.toList
+                }
+                
+                // Check field type
+                val scores = (datum(field) match {
+                    case dtm: Seq[String] => model.simpleWordOverlapClassifier(dtm.toList, newCandidates, newCutoff)
+                    case dtm: String      => model.simpleWordOverlapClassifier(dtm.split(" ").toList, newCandidates, newCutoff)
+                    case dtm              => model.simpleWordOverlapClassifier(dtm.toString.split(" ").toList, newCandidates, newCutoff)
+                }) map {score =>
+                    if (score._2 < newCutoff) (-1, 0.0) else score
+                }
+                
                 // Flatten if we have to
                 if (flatten) scores.head._1 else scores.take(top)
             })

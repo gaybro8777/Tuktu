@@ -24,25 +24,15 @@ a:hover, a:focus, img, img:hover, img:focus {
 	border: 0;
 }
 
-.navbar-fixed-top {
-	padding-left: 100px;
-	padding-right: 100px;
-}
-
-@media screen and (max-width: 768px) {
-	body {
-		font-size: 12px;
-	}
-	.navbar-fixed-top {
-		padding-left: 50px;
-		padding-right: 50px;
+@media (max-width: 993px) {
+	.pull-right {
+		display: none;
 	}
 }
 
-@media screen and (max-width: 1024px) {
-	.navbar-fixed-top {
-		padding-left: 80px;
-		padding-right: 80px;
+@media (max-width: 768px) {
+	#sidebar-wrapper {
+		display: none;
 	}
 }
 
@@ -61,6 +51,14 @@ a:hover, a:focus, img, img:hover, img:focus {
 	padding-bottom: 0;
 	padding-left: 0;
 	padding-right: 0;
+}
+
+.navbar-brand-2 {
+    float: left;
+    height: 50px;
+    padding: 15px 15px;
+    font-size: 18px;
+    line-height: 20px;
 }
 
 .navbar-default .navbar-nav > li > a {
@@ -84,20 +82,21 @@ a:hover, a:focus, img, img:hover, img:focus {
 	text-decoration: underline;
 }
 
-#sidebar-wrapper {
-	width: 250px;
-	color: #333;
-	background: #eee;
-	box-shadow: 0 -2px 4px rgba(33, 33, 33, 0.6);
-}
-
-.sidebar-nav li a:hover {
-	color: #ddd;
-	background: #777;
-}
-
 .sidebar-brand {
 	margin-top: 30px;
 	margin-left: 45px;
 	margin-bottom: 20px;
+}
+
+.w3-bar-item.w3-button {
+	text-decoration: none;
+}
+
+.w3-sidebar {
+	background: #eee;
+}
+
+#page-content-wrapper {
+	margin-left: 10px;
+	margin-top: 10px;
 }

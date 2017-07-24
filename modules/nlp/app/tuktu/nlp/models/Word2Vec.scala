@@ -39,7 +39,7 @@ class Word2Vec() extends BaseModel {
      * Gets a document vector by simply taking the mean of word vectors
      */
     def getAverageDocVector(inputWords: Seq[String], tfidf: Option[Map[String, Double]]) = {
-        val containedWords = inputWords.filter(wordMap.contains(_))
+        val containedWords = inputWords.filter(x=>wordMap.contains(x.toLowerCase))
         if (containedWords.size != 0) {
             val allWords = Nd4j.create(containedWords.size, layerSize)
     
@@ -75,9 +75,9 @@ class Word2Vec() extends BaseModel {
      * This classifier is similar to the one above but instead of looking at averaged word vectors, it looks at vectors word-by-word
      * and sees if there is a close-enough overlap between one or more candidate set words and the sentence's words.
      */
-    def simpleWordOverlapClassifier(inputWords: List[String], candidateWordsClasses: List[List[INDArray]], cutoff: Double = 0.7) = {
+    def simpleWordOverlapClassifier(inputWords: List[String], candidateWordsClasses: List[List[INDArray]], cutoff: Double = 0.225) = {
         // Conver input words
-        val vectors = inputWords.filter(wordMap.contains(_)).map(wordMap(_))
+        val vectors = inputWords.filter(x=>wordMap.contains(x.toLowerCase)).map(x=>wordMap(x.toLowerCase))
         // Go over the candidate sets and match
         candidateWordsClasses.zipWithIndex.map {wordClass =>
             // Average of all the word similarities
