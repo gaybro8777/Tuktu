@@ -18,8 +18,6 @@ import fastparse.all._
 import org.apache.commons.lang3.StringEscapeUtils
 
 object utils {
-    val logDpContent = Cache.getAs[Boolean]("mon.log_dp_content").getOrElse(Play.current.configuration.getBoolean("tuktu.monitor.log_dp_content").getOrElse(true))
-
     /**
      * Enumeratee for error-logging and handling
      * @param idString A string used to identify the flow this logEnumeratee is part of. A mapping exists
@@ -27,16 +25,20 @@ object utils {
      * @param configName The name of the config (if known)
      * @param processorName The name of the processor (if known)
      */
-    def logEnumeratee[T](idString: String, configName: String = "Unknown", processorName: String = "Unknown") = Enumeratee.recover[T] {
-        case (e, input) => {
-            // Notify the monitor so it can kill our flow
-            Akka.system.actorSelection("user/TuktuMonitor") ! new ErrorNotificationPacket(idString, configName, processorName, input.toString, e)
+    def logEnumeratee[T](idString: String, configName: String = "Unknown", processorName: String = "Unknown") = {
+        val logDpContent = Cache.getAs[Boolean]("mon.log_dp_content").getOrElse(Play.current.configuration.getBoolean("tuktu.monitor.log_dp_content").getOrElse(true))
 
-            // Log the error
-            if (logDpContent)
-                play.api.Logger.error(s"Error happened at flow: $configName, processor: $processorName, id: $idString, on Input: " + input, e)
-            else
-                play.api.Logger.error(s"Error happened at flow: $configName, processor: $processorName, id: $idString", e)
+        Enumeratee.recover[T] {
+            case (e, input) => {
+                // Notify the monitor so it can kill our flow
+                Akka.system.actorSelection("user/TuktuMonitor") ! new ErrorNotificationPacket(idString, configName, processorName, input.toString, e)
+
+                // Log the error
+                if (logDpContent)
+                    play.api.Logger.error(s"Error happened at flow: $configName, processor: $processorName, id: $idString, on Input: " + input, e)
+                else
+                    play.api.Logger.error(s"Error happened at flow: $configName, processor: $processorName, id: $idString", e)
+            }
         }
     }
 
@@ -75,6 +77,21 @@ object utils {
                         case None               => "${" + key + "}"
                         case Some(js: JsString) => js.value
                         case Some(a)            => a.toString
+                    }
+                    case Some("capitalize") => value match {
+                        case None               => "null".capitalize
+                        case Some(js: JsString) => js.value.capitalize
+                        case Some(a)            => a.toString.capitalize
+                    }
+                    case Some("toLowerCase") => value match {
+                        case None               => "null".toLowerCase
+                        case Some(js: JsString) => js.value.toLowerCase
+                        case Some(a)            => a.toString.toLowerCase
+                    }
+                    case Some("toUpperCase") => value match {
+                        case None               => "null".toUpperCase
+                        case Some(js: JsString) => js.value.toUpperCase
+                        case Some(a)            => a.toString.toUpperCase
                     }
                     case Some("JSON.stringify") => AnyToJsValue(value).toString
                     case Some("SQL") =>
@@ -117,7 +134,7 @@ object utils {
         }
 
         // Supported functions; empty String not properly supported by StringIn, so we will use Option instead
-        val functionNames: Seq[String] = Seq("JSON.stringify", "SQL", "SplitGet", "GetOrNull")
+        val functionNames: Seq[String] = Seq("toLowerCase", "toUpperCase", "capitalize", "JSON.stringify", "SQL", "SplitGet", "GetOrNull")
 
         // AnyChar and AnyChar but closing curly bracket
         val anyChar: P[TuktuStringString] = P(AnyChar).!.map { TuktuStringString(_) }
@@ -137,6 +154,13 @@ object utils {
         }
         val configTotal: P[TuktuStringRoot] = P(Start ~ (configString | anyChar).rep ~ End).map { TuktuStringRoot(_) }
 
+        // Meta strings
+        val metaKey: P[Seq[TuktuStringNode]] = P(metaString | string).rep
+        val metaString: P[TuktuStringFunction] = P("%" ~ StringIn(functionNames: _*).!.? ~ "{" ~ metaKey ~ "}").map {
+            case (optFunction, key) => TuktuStringFunction(optFunction, key)
+        }
+        val metaTotal: P[TuktuStringRoot] = P(Start ~ (metaString | anyChar).rep ~ End).map { TuktuStringRoot(_) }
+
         // Minify Tree by combining neighboring TuktuStringStrings
         def minify(root: TuktuStringRoot): TuktuStringRoot = {
             def helper(rest: Seq[TuktuStringNode]): Seq[TuktuStringNode] = rest match {
@@ -154,6 +178,7 @@ object utils {
                 specialChar match {
                     case '$' => tuktuTotal.parse(str).get.value
                     case '#' => configTotal.parse(str).get.value
+                    case '%' => metaTotal.parse(str).get.value
                 })
         // Evaluate Tuktu String given a map of variables
         def apply(root: TuktuStringRoot, vars: Map[String, Any]): String =

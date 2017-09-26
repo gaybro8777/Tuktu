@@ -38,11 +38,31 @@
 					"description": "The field the data resides in. Data must be of type Seq[Double]."
 				},
 				{
+					"name": "features_to_add",
+					"type": "array",
+					"required": false,
+					"description": "If given, the fields in this list specify additional feature vectors to add.",
+					"parameters": [
+						{
+							"name": "",
+							"type": "string",
+							"required": true,
+							"description": "A field containing an additional feature vector."
+						}
+					]
+				},
+				{
 					"name": "language",
 					"type": "string",
 					"required": false,
 					"description": "The language of all the data inside the DP. Used for finding sentence boundaries.",
 					"default": "en"
+				},
+				{
+					"name": "default_class",
+					"type": "string",
+					"required": false,
+					"description": "If the document bears too little information (less than 10 characters), this default class will be returned. Must be an integer. If not given, -1.0 is returned in cases where the text is too small."
 				}
 			]
 		}

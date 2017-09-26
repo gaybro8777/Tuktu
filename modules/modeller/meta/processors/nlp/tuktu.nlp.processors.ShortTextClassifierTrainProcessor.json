@@ -51,6 +51,20 @@
 					"description": "The field the label is in. Value must be a double."
 				},
 				{
+					"name": "features_to_add",
+					"type": "array",
+					"required": false,
+					"description": "If given, the fields in this list specify additional feature vectors to add.",
+					"parameters": [
+						{
+							"name": "",
+							"type": "string",
+							"required": true,
+							"description": "A field containing an additional feature vector."
+						}
+					]
+				},
+				{
 					"name": "min_count",
 					"type": "int",
 					"required": true,
@@ -76,6 +90,13 @@
 					"default": "en"
 				},
 				{
+					"name": "split_sentences",
+					"type": "string",
+					"required": false,
+					"description": "Whether or not to split sentences. If sentences are split, the classifier runs on every sentence seperately, otherwise it runs on the entire text.",
+					"default": "true"
+				},
+				{
 					"name": "seed_word_file",
 					"type": "string",
 					"required": true,
@@ -92,18 +113,6 @@
 					"type": "string",
 					"required": true,
 					"description": "The file that contains the left flips for this language."
-				},
-				{
-					"name": "vector_file",
-					"type": "string",
-					"required": true,
-					"description": "The file that contains the FastText word vectors."
-				},
-				{
-					"name": "similarity_threshold",
-					"type": "double",
-					"required": true,
-					"description": "The threshold determining when a seed words is similar enough to a non-seed word using Cosine Similarity."
 				}
 			]
 		}

@@ -1,0 +1,78 @@
+{
+	"name": "SQL Cache Table Processor",
+	"description": "Caches data resulting from an SQL query and keys it for lookup queries afterwards.",
+	"class": "tuktu.nosql.processors.sql.CacheTableProcessor",
+	"parameters": [
+		{
+			"name": "id",
+			"type": "string",
+			"required": true
+		},
+		{
+			"name": "result",
+			"type": "string",
+			"required": true
+		},
+		{
+			"name": "config",
+			"type": "object",
+			"required": true,
+			"parameters": [
+				{
+					"name": "cache_name",
+					"description": "The name of this cached table. Will be loaded once on the node running this flow and then used from cache.",
+					"type": "string",
+					"required": true
+				},
+				{
+					"name": "url",
+					"description": "A database url of the form jdbc:subprotocol:subname.",
+					"type": "string",
+					"required": true
+				},
+				{
+					"name": "user",
+					"description": "The database user on whose behalf the connection is being made.",
+					"type": "string",
+					"required": true
+				},
+				{
+					"name": "password",
+					"description": "The user's password.",
+					"type": "string",
+					"required": true
+				},
+				{
+					"name": "driver",
+					"description": "The driver to be used, for example org.h2.Driver.",
+					"type": "string",
+					"required": true
+				},
+				{
+					"name": "sql_query",
+					"description": "The SQL query to run for which the results will be cached.",
+					"type": "string",
+					"required": true
+				},
+				{
+					"name": "key_by",
+					"description": "The SQL column name to key by.",
+					"type": "string",
+					"required": true
+				},
+				{
+					"name": "data_query",
+					"description": "The query to run on the data.",
+					"type": "string",
+					"required": true
+				},
+				{
+					"name": "filters",
+					"description": "Filters to apply on the data. May only contain String values because they are evaluated.",
+					"type": "any",
+					"required": false
+				}
+			]
+		}
+	]
+}

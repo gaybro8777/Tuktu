@@ -762,7 +762,13 @@ class ImploderProcessor(resultName: String) extends BaseProcessor(resultName) {
     override def processor(): Enumeratee[DataPacket, DataPacket] = Enumeratee.mapM(data => Future {
         for (datum <- data) yield {
             fields match {
-                case Some(fs) => datum + (resultName -> fs.map(field => datum(field)))
+                case Some(fs) => datum + (resultName -> fs.flatMap(field => {
+                    datum(field) match {
+                        case f: Seq[Any] => f.toList
+                        case f: Array[Any] => f.toList
+                        case f: Any => List(f)
+                    }
+                }))
                 case None     => datum + (resultName -> datum.toList.sortBy(_._1).map(_._2))
             }
         }
@@ -895,11 +901,37 @@ class SequenceExploderProcessor(resultName: String) extends BaseProcessor(result
     }
 
     override def processor(): Enumeratee[DataPacket, DataPacket] = Enumeratee.mapM((data: DataPacket) => Future {
-        data.flatMap(datum => {
+        data.flatMap { datum =>
             // Get the field and explode it
-            val values = datum(field).asInstanceOf[Seq[Any]]
+            val values: Seq[Any] = datum(field) match {
+                case js: JsArray => js.value
+                case any: Any    => any.asInstanceOf[Seq[Any]]
+            }
 
             for (value <- values) yield datum + (field -> value)
+        }
+    })
+}
+
+/**
+ * Returns the size of a sequence
+ */
+class SequenceLengthProcessor(resultName: String) extends BaseProcessor(resultName) {
+    var field: String = _
+
+    override def initialize(config: JsObject) {
+        field = (config \ "field").as[String]
+    }
+
+    override def processor(): Enumeratee[DataPacket, DataPacket] = Enumeratee.mapM((data: DataPacket) => Future {
+        new DataPacket(data.data.map {datum =>
+            datum + (resultName -> {
+                datum(field) match {
+                    case js: JsArray => js.value.size
+                    case a: Array[Any] => a.size
+                    case any: Any    => any.asInstanceOf[Seq[Any]].size
+                }
+            })
         })
     })
 }
@@ -968,10 +1000,12 @@ class DataPacketWrapperProcessor(resultName: String) extends BaseProcessor(resul
 class StringSplitterProcessor(resultName: String) extends BaseProcessor(resultName) {
     var field: String = _
     var separator: String = _
+    var removeEmpty: Boolean = _
 
     override def initialize(config: JsObject) {
         field = (config \ "field").as[String]
         separator = (config \ "separator").as[String]
+        removeEmpty = (config \ "remove_empty").asOpt[Boolean].getOrElse(true)
     }
 
     override def processor(): Enumeratee[DataPacket, DataPacket] = Enumeratee.mapM(data => Future {
@@ -979,7 +1013,9 @@ class StringSplitterProcessor(resultName: String) extends BaseProcessor(resultNa
             // Get the field and explode it
             val values = datum(field).toString.split(separator).toList
 
-            datum + (resultName -> values)
+            datum + (resultName -> {
+                if (removeEmpty) values.filter(!_.isEmpty) else values
+            })
         }
     })
 }

@@ -19,7 +19,7 @@ object sql {
     val pools = collection.mutable.Map[ConnectionDefinition, HikariDataSource]()
     // Gets a single connection
     def getConnection(conn: ConnectionDefinition,
-            maxSize: Int = Play.current.configuration.getInt("tuktu.nosql.sql.pools.min_size").getOrElse(50)
+            maxSize: Int = Play.current.configuration.getInt("tuktu.nosql.sql.pools.max_size").getOrElse(50)
     ): Connection = {
         def newConnection() = {
             // Create new source
@@ -29,6 +29,7 @@ object sql {
             config.setUsername(conn.user)
             config.setPassword(conn.password)
             config.addDataSourceProperty("maximumPoolSize", maxSize)
+            config.setLeakDetectionThreshold(30000)
             val ds = new HikariDataSource(config)
             pools += conn -> ds
             ds.getConnection

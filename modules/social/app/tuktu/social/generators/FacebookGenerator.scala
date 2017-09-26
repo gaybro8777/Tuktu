@@ -138,7 +138,8 @@ class PostCollector(fbClient: DefaultFacebookClient, commentCollector: ActorRef,
 }
 
 class CommentCollector(fbClient: DefaultFacebookClient, authorCollector: ActorRef, commentFrequency: Int) extends Actor with ActorLogging {
-    val posts = collection.mutable.Map.empty[JsObject, (Long, Int)]
+    // Contains posts ánd comments we still need to fetch
+    val posts = collection.mutable.Map.empty[JsObject, (Long, Int, Boolean)]
     var isRequesting = false
     
     def receive() = {
@@ -147,7 +148,7 @@ class CommentCollector(fbClient: DefaultFacebookClient, authorCollector: ActorRe
             self ! PoisonPill
         }
         case pl: PostList => pl.posts.foreach {post =>
-            posts += post -> (1L, 0)
+            posts += post -> (1L, 0, false)
         }
         case ic: IterateComments => {
             if (!isRequesting) {
@@ -195,9 +196,14 @@ class CommentCollector(fbClient: DefaultFacebookClient, authorCollector: ActorRe
                                     try {
                                         val json = Json.parse(obj.toString).asInstanceOf[JsObject]
                                         // Merge the original post into the comment
-                                        val newObj = json ++ Json.obj("post" -> usePosts(offset * 50 + index)._1)
+                                        val up = usePosts(offset * 50 + index)
+                                        val newObj = json ++ Json.obj({
+                                            if (up._2._3) "comment" else "post"
+                                        } -> up._1, "is_comment_to_post" -> !up._2._3) 
                                         // Add to our buffer
                                         buffer += newObj
+                                        // Also add to the list of posts and comments we still have to fetch comments of
+                                        posts += newObj -> (1L, 0, true)
                                         // Send if we have reached 10 pages
                                         if (buffer.size == 500) {
                                             authorCollector ! new PostList(buffer.toList, true)
@@ -218,7 +224,7 @@ class CommentCollector(fbClient: DefaultFacebookClient, authorCollector: ActorRe
                 
                 // Update the counts and kick out the ones we don't need anymore
                 usePosts.foreach {post =>
-                    posts(post._1) = (now + 1, post._2._2 + 1)
+                    posts(post._1) = (now + 1, post._2._2 + 1, post._2._3)
                     if (posts(post._1)._2 >= commentFrequency) posts -= post._1
                 }
                 isRequesting = false
@@ -233,8 +239,8 @@ class AuthorCollector(fbClient: DefaultFacebookClient, channel: Concurrent.Chann
      * that we can actually get per node type
      */
     val eligibleFields = Map(
-        "page" -> List("id","about","affiliation","artists_we_like","attire","awards","band_interests","band_members","best_page","bio","birthday","booking_agent","built","can_checkin","can_post","category","category_list","checkins","company_overview","contact_address","country_page_likes","cover","culinary_team","current_location","description","description_html","directed_by","display_subtext","emails","fan_count","features","food_styles","founded","general_info","general_manager","genre","global_brand_page_name","global_brand_root_id","has_added_app","hometown","hours","influences","is_community_page","is_permanently_closed","is_published","is_unclaimed","is_verified","leadgen_tos_accepted","link","location","members","mission","mpg","name","network","new_like_count","offer_eligible","overall_star_rating","parent_page","parking","payment_options","personal_info","personal_interests","pharma_safety_info","phone","place_type","plot_outline","press_contact","price_range","produced_by","products","promotion_ineligible_reason","public_transit","publisher_space","rating_count","record_label","release_date","restaurant_services","restaurant_specialties","schedule","screenplay_by","season","single_line_address","starring","store_number","studio","talking_about_count","unread_message_count","unread_notif_count","unseen_message_count","username","voip_info","website","were_here_count","written_by"),
-        "user" -> List("id", "about", "age_range", "birthday", "cover", "currency", "devices", "education", "email", "favorite_athletes", "favorite_teams", "first_name", "gender", "hometown", "inspirational_people", "install_type", "installed", "interested_in", "is_verified", "languages", "last_name", "link", "locale", "location", "meeting_for", "middle_name", "name", "name_format", "payment_pricepoints", "political", "public_key", "quotes", "relationship_status", "religion", "security_settings", "significant_other", "sports", "third_party_id", "timezone", "updated_time", "verified", "video_upload_limits", "viewer_can_send_gift", "website", "work")
+        "page" -> List("id","picture.type(large)","about","affiliation","artists_we_like","attire","awards","band_interests","band_members","best_page","bio","birthday","booking_agent","built","can_checkin","can_post","category","category_list","checkins","company_overview","contact_address","country_page_likes","cover","culinary_team","current_location","description","description_html","directed_by","display_subtext","emails","fan_count","features","food_styles","founded","general_info","general_manager","genre","global_brand_page_name","global_brand_root_id","has_added_app","hometown","hours","influences","is_community_page","is_permanently_closed","is_published","is_unclaimed","is_verified","leadgen_tos_accepted","link","location","members","mission","mpg","name","network","new_like_count","offer_eligible","overall_star_rating","parent_page","parking","payment_options","personal_info","personal_interests","pharma_safety_info","phone","place_type","plot_outline","press_contact","price_range","produced_by","products","promotion_ineligible_reason","public_transit","publisher_space","rating_count","record_label","release_date","restaurant_services","restaurant_specialties","schedule","screenplay_by","season","single_line_address","starring","store_number","studio","talking_about_count","unread_message_count","unread_notif_count","unseen_message_count","username","voip_info","website","were_here_count","written_by"),
+        "user" -> List("id","picture.type(large)","about","age_range","birthday","cover","currency","devices","education","email","favorite_athletes","favorite_teams","first_name","gender","hometown","inspirational_people","install_type","installed","interested_in","is_verified","languages","last_name","link","locale","location","meeting_for","middle_name","name","name_format","payment_pricepoints","political","public_key","quotes","relationship_status","religion","security_settings","significant_other","sports","third_party_id","timezone","updated_time","verified","video_upload_limits","viewer_can_send_gift","website","work")
     )
     var commentCollector: ActorRef = _
     
@@ -357,9 +363,8 @@ class FacebookGenerator(resultName: String, processors: List[Enumeratee[DataPack
             val fbClient = new DefaultFacebookClient(aToken, Version.VERSION_2_8)
 
             // Filters that we need to check
-            val filters = Common.getFilters(config)
-            users = filters("userids")
-                .asInstanceOf[Array[String]].map(_ + "/feed")
+            val (_, userids, _) = Common.getFilters(config)
+            users = userids.map(_ + "/feed")
                 
             // Stop if there are no users
             if (users.size == 0) self ! new StopPacket

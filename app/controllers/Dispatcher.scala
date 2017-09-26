@@ -44,7 +44,13 @@ object Dispatcher {
      */
     def monitorEnumeratee(uuid: String, branch: String, mpType: MPType): Enumeratee[DataPacket, DataPacket] = {
         Enumeratee.mapM((data: DataPacket) => Future {
-            Akka.system.actorSelection("user/TuktuMonitor") ! new MonitorPacket(mpType, uuid, branch, data.size)
+            try {
+                Akka.system.actorSelection("user/TuktuMonitor") ! new MonitorPacket(mpType, uuid, branch, data.size)
+            } catch {
+                case e: java.lang.IllegalStateException => {
+                    // To prevent 'java.lang.IllegalStateException: Can't get ClosableLazy value after it has been closed' when app closes
+                }
+            }
             data
         })
     }
@@ -430,11 +436,7 @@ class Dispatcher(monitorActor: ActorRef) extends Actor with ActorLogging {
                     val instanceCount = nodeInstance._2
 
                     // See if this one needs to be started remotely or not
-                    val startRemotely = {
-                        // We may or may not need to start remotely
-                        if (hostname == Cache.getAs[String]("homeAddress").getOrElse("127.0.0.1")) false
-                        else true
-                    }
+                    val startRemotely = hostname != Cache.getAs[String]("homeAddress").getOrElse("127.0.0.1")
 
                     val clusterNodes = Cache.getOrElse[scala.collection.mutable.Map[String, ClusterNode]]("clusterNodes")(scala.collection.mutable.Map())
                     if (startRemotely && !dr.isRemote && hostname != "" && clusterNodes.contains(hostname)) {

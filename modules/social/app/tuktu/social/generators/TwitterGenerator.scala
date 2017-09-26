@@ -22,68 +22,73 @@ class TwitterGenerator(resultName: String, processors: List[Enumeratee[DataPacke
             val accessTokenSecret = (credentials \ "access_token_secret").as[String]
 
             // Get filters
-            val filters = Common.getFilters(config)
-            val keywords = filters("keywords").asInstanceOf[Array[String]]
-            val userids = filters("userids").asInstanceOf[Array[String]].map(elem => elem.toLong)
-            val geo = filters("geo").asInstanceOf[Array[Array[Double]]]
+            val (keywords, userids, geo) = Common.getFilters(config)
 
-            // Implement the Twitter4J status listener which determines what to listen for
-            val listener: StatusListener = new StatusListener() {
-                @Override
-                def onStatus(status: Status): Unit = {
-                    // Flatten the status and push it on
-                    val flatStatus = Json.parse(DataObjectFactory.getRawJSON(status))
-                    channel.push(DataPacket(List(Map(resultName -> flatStatus))))
+            if (keywords.isEmpty && userids.isEmpty && geo.isEmpty)
+                self ! new StopPacket
+            else {
+                // Implement the Twitter4J status listener which determines what to listen for
+                val listener: StatusListener = new StatusListener() {
+                    @Override
+                    def onStatus(status: Status): Unit = {
+                        // Flatten the status and push it on
+                        val flatStatus = Json.parse(DataObjectFactory.getRawJSON(status))
+                        channel.push(DataPacket(List(Map(resultName -> flatStatus))))
+                    }
+
+                    @Override
+                    def onDeletionNotice(sdn: StatusDeletionNotice): Unit = {}
+
+                    @Override
+                    def onTrackLimitationNotice(i: Int): Unit = {}
+
+                    @Override
+                    def onScrubGeo(l: Long, l1: Long): Unit = {}
+
+                    @Override
+                    def onException(e: Exception): Unit = {
+                        Logger.error("Exception while creating Twitter steam.", e)
+                    }
+
+                    @Override
+                    def onStallWarning(warning: StallWarning): Unit = {
+                        Logger.warn(warning.toString)
+                    }
                 }
 
-                @Override
-                def onDeletionNotice(sdn: StatusDeletionNotice): Unit = {}
+                //System.setProperty ("twitter4j.loggerFactory", "twitter4j.internal.logging.NullLoggerFactory")
+                // Create a Twitter4J configuration to pass on the OAuth credentials
+                val cb = new ConfigurationBuilder().
+                    setDebugEnabled(true).
+                    setJSONStoreEnabled(true).
+                    setOAuthConsumerKey(consumerKey).
+                    setOAuthConsumerSecret(consumerSecret).
+                    setOAuthAccessToken(accessToken).
+                    setOAuthAccessTokenSecret(accessTokenSecret)
+                // Create a Twitter4J instance with the OAuth credentials and the listener
+                val fact = new TwitterStreamFactory(cb.build)
+                twitterStream = fact.getInstance
+                twitterStream.addListener(listener)
 
-                @Override
-                def onTrackLimitationNotice(i: Int): Unit = {}
+                // Add the filters (otherwise we get the sample)
+                val fq = new FilterQuery()
+                if (keywords != null && !keywords.isEmpty)
+                    fq.track(keywords: _*)
+                if (userids != null && !userids.isEmpty)
+                    fq.follow(userids.map { _.toLong }: _*)
+                if (geo != null && !geo.isEmpty)
+                    fq.locations(geo: _*)
 
-                @Override
-                def onScrubGeo(l: Long, l1: Long): Unit = {}
-
-                @Override
-                def onException(e: Exception): Unit = {
-                    Logger.error("Exception while creating Twitter steam.", e)
-                }
-
-                @Override
-                def onStallWarning(warning: StallWarning): Unit = {
-                    Logger.warn(warning.toString)
-                }
+                // Add the query
+                twitterStream.filter(fq)
             }
-
-            //System.setProperty ("twitter4j.loggerFactory", "twitter4j.internal.logging.NullLoggerFactory")
-            // Create a Twitter4J configuration to pass on the OAuth credentials
-            val cb = new ConfigurationBuilder().
-                setDebugEnabled(true).
-                setJSONStoreEnabled(true).
-                setOAuthConsumerKey(consumerKey).
-                setOAuthConsumerSecret(consumerSecret).
-                setOAuthAccessToken(accessToken).
-                setOAuthAccessTokenSecret(accessTokenSecret)
-            // Create a Twitter4J instance with the OAuth credentials and the listener
-            val fact = new TwitterStreamFactory(cb.build)
-            twitterStream = fact.getInstance
-            twitterStream.addListener(listener)
-
-            // Add the filters (otherwise we get the sample)
-            val fq = new FilterQuery()
-            if (keywords != null && !keywords.isEmpty)
-                fq.track(keywords: _*)
-            if (userids != null && !userids.isEmpty)
-                fq.follow(userids: _*)
-            if (geo != null && !geo.isEmpty)
-                fq.locations(geo: _*)
-
-            // Add the query
-            twitterStream.filter(fq)
         }
         case sp: StopPacket => {
-            twitterStream.shutdown
+            try {
+                twitterStream.shutdown
+            } catch {
+                case e: NullPointerException => {}
+            }
             cleanup
         }
     }

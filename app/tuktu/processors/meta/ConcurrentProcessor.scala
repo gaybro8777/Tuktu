@@ -36,31 +36,57 @@ case class AddSender()
 /**
  * Actor that deals with parallel processing
  */
-class ConcurrentProcessorActor(parent: ActorRef, start: String, processorMap: Map[String, ProcessorDefinition], ignoreResults: Boolean) extends Actor with ActorLogging {
+class ConcurrentProcessorActor(parent: ActorRef, start: String, processorMap: Map[String, ProcessorDefinition], ignoreResults: Boolean, anchorValues: Option[List[String]], concurrentName: String) extends Actor with ActorLogging {
     implicit val timeout = Timeout(Cache.getAs[Int]("timeout").getOrElse(5) seconds)
     val (enumerator, channel) = Concurrent.broadcast[DataPacket]
     val sinkIteratee: Iteratee[DataPacket, Unit] = Iteratee.ignore
     
+    // Store this concurrent name if it wasn't there yet
+    Cache.getAs[collection.mutable.Map[String, ActorRef]]("concurrent.names").get += concurrentName -> parent
+    
     // Build the processor
     val (idString, processor) = {
-            val pipeline = controllers.Dispatcher.buildEnums(List(start), processorMap, None, "Concurrent Processor - Unknown", true)
+            val pipeline = controllers.Dispatcher.buildEnums(List(start), processorMap, None, {
+                // Add the anchor values to the name
+                anchorValues match {
+                    case Some(v) => "ConcurrentProcessor." + concurrentName + "[" + v.mkString(",") + "]@" + parent.path.address.toString
+                    case None => "ConcurrentProcessor." + concurrentName + "@" + parent.path.address.toString
+                }
+            }, true)
             (pipeline._1, pipeline._2.head)
     }
+    
+    // Notify the monitor so we can recover from errors
+    Akka.system.actorSelection("user/TuktuMonitor") ! new AppInitPacket(
+            idString,
+            anchorValues match {
+                case Some(v) => "ConcurrentProcessor." + concurrentName + "[" + v.mkString(",") + "]@" + parent.path.address.toString
+                case None => "ConcurrentProcessor." + concurrentName + "@" + parent.path.address.toString
+            },
+            1,
+            true,
+            Some(self)
+    )
+    
     val sendBack: Enumeratee[DataPacket, DataPacket] = Enumeratee.mapM(data => Future {
         parent ! data
         data
     })
     // Set up the pipeline
     if (ignoreResults)
-        enumerator |>> processor &>> sinkIteratee
+        enumerator |>> (processor compose Enumeratee.onEOF { () =>
+            Akka.system.actorSelection("user/TuktuMonitor") ! new AppMonitorUUIDPacket(idString, "done")
+        }) &>> sinkIteratee
     else
-        enumerator |>> (processor compose sendBack compose utils.logEnumeratee("")) &>> sinkIteratee
-    
-    // If we don't need to send back, just forward
-    if (ignoreResults) enumerator |>> processor &>> sinkIteratee
+        enumerator |>> (processor compose sendBack compose utils.logEnumeratee("") compose Enumeratee.onEOF { () =>
+            Akka.system.actorSelection("user/TuktuMonitor") ! new AppMonitorUUIDPacket(idString, "done")
+        }) &>> sinkIteratee
 
     def receive() = {
-        case sp: StopPacket => self ! PoisonPill
+        case sp: StopPacket => {
+            Cache.getAs[collection.mutable.Map[String, ActorRef]]("concurrent.names").get -= concurrentName
+            self ! PoisonPill
+        }
         case dp: DataPacket => channel.push(dp)
     }
 }
@@ -70,16 +96,27 @@ class ConcurrentProcessorActor(parent: ActorRef, start: String, processorMap: Ma
  */
 class IntermediateActor(genActor: ActorRef, nodes: List[(String, ClusterNode)], instanceCount: Int,
         start: String, processorMap: Map[String, ProcessorDefinition], anchorFields: Option[List[String]],
-        anchorDomain: List[String], ignoreResults: Boolean) extends Actor with ActorLogging {
+        anchorDomain: List[String], ignoreResults: Boolean, concurrentName: String) extends Actor with ActorLogging {
     implicit val timeout = Timeout(Cache.getAs[Int]("timeout").getOrElse(5) seconds)
     var actorOffset = 0
     var connectedSenders = 0
     
-    // Set up remove actors across the nodes
-    val routers = nodes.map { node =>
+    // Set up remote actors across the nodes
+    val routers = nodes.zipWithIndex.map { ni =>
+        val node = ni._1
+        val nodeOffset = ni._2
+        
         Akka.system.actorOf(RemoteRouterConfig(RoundRobinPool(instanceCount),
             Seq(Address("akka.tcp", "application", node._2.host, node._2.akkaPort))
-        ).props(Props(classOf[ConcurrentProcessorActor], self, start, processorMap, ignoreResults)))
+        ).props(Props(classOf[ConcurrentProcessorActor], self, start, processorMap, ignoreResults, {
+            // Anchor values
+            if (anchorDomain.size == 0) None else {
+                // Find the values that route to this node
+                Some((anchorDomain.zipWithIndex.map {value =>
+                    (value._2 % nodes.size, value._1)
+                } groupBy {_._1})(nodeOffset).map(_._2))
+            }
+        }, concurrentName)))
     }
     
     /**
@@ -211,7 +248,7 @@ class ConcurrentProcessor(genActor: ActorRef, resultName: String) extends Buffer
         
         // Set up the intermediate actor
         intermediateActor = Akka.system.actorOf(Props(classOf[IntermediateActor], genActor, nodes, instanceCount, start,
-                processorMap, anchorFields, anchorDomain, ignoreResults), name = "Concurrent_" + concurrentName)
+                processorMap, anchorFields, anchorDomain, ignoreResults, concurrentName), name = "Concurrent_" + concurrentName)
         // Tell the intermediate actor we are connected
         intermediateActor ! new AddSender
     }
@@ -220,39 +257,14 @@ class ConcurrentProcessor(genActor: ActorRef, resultName: String) extends Buffer
         val concurrentName = (config \ "concurrent_name").as[String]
         
         // Check if this concurrent processor already exists
-        val clusterNodes = Cache.getOrElse[scala.collection.mutable.Map[String, ClusterNode]]("clusterNodes")(scala.collection.mutable.Map())
-        val homeAddress = Cache.getAs[String]("homeAddress").getOrElse("127.0.0.1")
-        val futures = clusterNodes.map {node =>
-            val address = if (node._1 == homeAddress)
-                    "/user/Concurrent_" + concurrentName
-                else
-                    "akka.tcp://application@" + node._1 + ":" + node._2.akkaPort + "/user/Concurrent_" + concurrentName
-            // Ask for identity
-            (Akka.system.actorSelection(address) ? new Identify(1)).asInstanceOf[Future[ActorIdentity]]
-        }
-        val promise = Promise[ActorIdentity]()
-        futures foreach { _ foreach promise.trySuccess }
-        val resultFuture = promise.future
-        resultFuture.onSuccess {
-            case ai: ActorIdentity => {
-                /**
-                 * We have found an already existing concurrent actor, use it
-                 */
-                intermediateActor = ai.getRef
-                if (intermediateActor == null)
-                    // No concurrent processor was found yet, we create it
-                    setUpIntermediateActor(config)
-                else
-                    // Tell the intermediate actor we are connected
-                    intermediateActor ! new AddSender
-            }
-        }
-        resultFuture.onFailure {
-            case _ =>
-                // No concurrent processor was found yet, we create it
-                setUpIntermediateActor(config)
-        }
-        Await.ready(resultFuture, timeout.duration + (1 seconds))
+        val runningConcurrentProcs = Cache.getAs[collection.mutable.Map[String, ActorRef]]("concurrent.names").get
+        if (runningConcurrentProcs.contains(concurrentName)) {
+            // Already exists
+            intermediateActor = runningConcurrentProcs(concurrentName)
+            // Tell the intermediate actor we are connected
+            intermediateActor ! new AddSender
+        } else setUpIntermediateActor(config)
+        Cache.getAs[collection.mutable.Map[String, ActorRef]]("concurrent.names").get += concurrentName -> intermediateActor
     }
 
     override def processor(): Enumeratee[DataPacket, DataPacket] = Enumeratee.mapM((data: DataPacket) => Future {

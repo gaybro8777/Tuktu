@@ -9,96 +9,82 @@ import tuktu.ml.models.BaseModel
 
 import de.bwaldvogel.liblinear._
 import java.io.File
-import com.github.jfasttext.JFastText
-import scala.collection.JavaConverters._
-import play.api.Logger
-import scala.concurrent.Future
-import scala.concurrent.ExecutionContext.Implicits.global
-import org.jblas.DoubleMatrix
+import com.vdurmont.emoji.EmojiParser
 
 class ShortTextClassifier(
-        minCount: Int, fastTextModel: String, similarityThreshold: Double
+        minCount: Int
 ) extends BaseModel {
-    var ftw = if (fastTextModel != null) FastTextCache.getModel(fastTextModel) else null
     // Map containing the terms that we have found so far amd their feature indexes
     val featureMap = collection.mutable.Map.empty[String, (Int, Int)]
+    var additionalFeaturesNum: Int = _
     var featureOffset = 1
     var _minCount: Int = minCount
-    var _seedWords: Map[String, List[Array[Double]]] = _
-    var _rightFlips: List[String] = _    
+    var _seedWords: Map[String, List[String]] = _
+    var _rightFlips: List[String] = _
     var _leftFlips: List[String] = _
     var model: Model = _
-    
-    def setWords(seedWords: Map[String, List[String]], rightFlips: List[String], leftFlips: List[String]) {
-        _seedWords = seedWords.map {sw =>
-            sw._1 -> sw._2.map {word =>
-                ftw.getWordVector(word)
-            }
-        }
+    var splitSentences: Boolean = _
+
+    def setWords(seedWords: Map[String, List[String]], rightFlips: List[String], leftFlips: List[String], splitSentences: Boolean = true) {
+        _seedWords = seedWords
         _rightFlips = rightFlips
         _leftFlips = leftFlips
+        this.splitSentences = splitSentences
     }
-    
+
     def processTokens(tokens: List[String]) = {
         // Convert the negated tokens
         val processedTokens = collection.mutable.ArrayBuffer.empty[String]
         val seedIndices = collection.mutable.ArrayBuffer.empty[Int]
-        processedTokens ++= tokens.zipWithIndex.map {token =>
-            _seedWords.find {sw =>
-                val vec = ftw.getWordVector(token._1)
-                sw._2.exists {seedVec =>
-                    CosineSimilarity.cosineSimilarity(seedVec, vec) >= similarityThreshold
-                }
+        processedTokens ++= tokens.zipWithIndex.map { case (token, index) =>
+            _seedWords.find { case (_, sw) =>
+                sw.contains(token)
             } match {
-                case Some(sw) => {
+                case Some((label, _)) =>
                     // Replace token by the label of this word
-                    seedIndices += token._2
-                    sw._1
-                }
-                case None => token._1
+                    seedIndices.append(index)
+                    label
+                case None => token
             }
         }
-        tokens.zipWithIndex.map {token =>
-            if (_rightFlips.contains(token._1))
+        tokens.zipWithIndex.map { case (token, index) =>
+            if (_rightFlips.contains(token))
                 // Negate words to the right
-                (1 to 2).foreach {offset =>
-                    if (processedTokens.size > token._2 + offset && seedIndices.contains(token._2 + offset))
-                        if (processedTokens(token._2 + offset).endsWith("_NEG"))
-                            processedTokens(token._2 + offset) = processedTokens(token._2 + offset).take(processedTokens(token._2 + offset).size - 4)
-                        else processedTokens(token._2 + offset) = processedTokens(token._2 + offset) + "_NEG"
+                (1 to 2).foreach { offset =>
+                    if (processedTokens.size > index + offset && seedIndices.contains(index + offset))
+                        if (processedTokens(index + offset).endsWith("_NEG"))
+                            processedTokens(index + offset) = processedTokens(index + offset).take(processedTokens(index + offset).size - 4)
+                        else processedTokens(index + offset) = processedTokens(index + offset) + "_NEG"
                 }
-            else if (_leftFlips.contains(token._1))
+            else if (_leftFlips.contains(token))
                 // Negate words to the left
-                (1 to 2).foreach {offset =>
-                    if (token._2 - offset >= 0 && seedIndices.contains(token._2 + offset))
-                        if (processedTokens(token._2 - offset).endsWith("_NEG"))
-                            processedTokens(token._2 - offset) = processedTokens(token._2 - offset).take(processedTokens(token._2 - offset).size - 4)
-                        else processedTokens(token._2 - offset) = processedTokens(token._2 - offset) + "_NEG"
+                (1 to 2).foreach { offset =>
+                    if (index - offset >= 0 && seedIndices.contains(index + offset))
+                        if (processedTokens(index - offset).endsWith("_NEG"))
+                            processedTokens(index - offset) = processedTokens(index - offset).take(processedTokens(index - offset).size - 4)
+                        else processedTokens(index - offset) = processedTokens(index - offset) + "_NEG"
                 }
         }
         processedTokens.toList
     }
-    
-    def getNgramFeatures(tokens: List[String], processedTokens: List[String]) = {
+
+    def getNgramFeatures(tokens: List[String], processedTokens: List[String]): List[String] = {
         // Construct the word N-grams
-        (1 to 3).toList.foldLeft(List.empty[String])((a,b) => {
-            a ++ NLP.getNgrams(processedTokens.toList, b).map(_.mkString)
+        (1 to 3).foldLeft(List.empty[String])((acc, b) => {
+            acc ++ NLP.getNgrams(processedTokens.toList, b).map(_.mkString)
         }) ++
             // Construct the character N-grams
-            (3 to 5).toList.foldLeft(List.empty[String])((a,b) => {
-                a ++ NLP.getNgramsChar(tokens.mkString(" ").toList, b).map(_.toString)
+            (3 to 5).foldLeft(List.empty[String])((acc, b) => {
+                acc ++ NLP.getNgramsChar(tokens.mkString(" ").toList, b).map(_.mkString)
             })
     }
-    
-    def addDocument(tokens: List[String]) = {
-        // Convert the negated tokens
-        val processedTokens = processTokens(tokens)
-        
+
+    def addDocument(tokens: List[String], processedTokens: List[String]) {
         // Construct the word N-grams
         val ngrams = getNgramFeatures(tokens, processedTokens)
-        
+
         // Add to the map
-        ngrams.foreach {ng =>
+        ngrams.foreach { ng =>
             if (!featureMap.contains(ng)) {
                 featureMap += ng -> (featureOffset, 0)
                 featureOffset += 1
@@ -106,84 +92,166 @@ class ShortTextClassifier(
             featureMap += ng -> (featureMap(ng)._1, featureMap(ng)._2 + 1)
         }
     }
-    
-    def tokensToVector(tokens: List[String]): Array[Feature] = {
-        val processedTokens = processTokens(tokens)
+
+    def getStaticFeatures(tokens: List[String]) = {
+        val sentence = tokens.mkString(" ")
+
+        // Get punctuation
+        val punctuation = sentence.count { char =>
+            List("!", ".", ",", "?", "!", ":", ";", "'", "\"", "[", "]", "{", "}", "(", ")", "-", "+", "=", "&", "%", "$", "€").exists(_ == char)
+        }.toDouble / sentence.size.toDouble
+
+        // Caps usage
+        val caps = sentence.count { char =>
+            char.isUpper
+        }.toDouble / sentence.size.toDouble
+
+        // Number of vowels
+        val vowels = sentence.count { char =>
+            List("a", "e", "o", "i", "u", "y",
+                  "ä", "á", "à", "â", "ã",
+                  "ë", "é", "è", "ê",
+                  "ö", "ó", "ò", "ô", "õ",
+                  "ï", "í", "ì", "î",
+                  "ü", "ú", "ù", "û",
+                  "ÿ", "ý"
+            ).exists(_ == char)
+        }.toDouble / sentence.size.toDouble
+
+        // Words starting with a capital
+        val capWords = tokens.count { t => t.nonEmpty && t.head.isUpper }.toDouble / tokens.size.toDouble
+        // Slow-release case
+        val slowRelease = tokens.count { t =>
+            if (t.size > 2) t(0).isUpper && t(1).isUpper else false
+        }.toDouble / tokens.size.toDouble
+
+        // First word capital or not?
+        val firstWordCap = if (sentence.headOption.map { _.isUpper }.getOrElse(false)) 1.0 else 0.0
+
+        // Count emojis
+        val emojis = sentence.size.toDouble - EmojiParser.removeAllEmojis(sentence).size.toDouble
+
+        // How lengthy is this sentence
+        val shortLength = if (sentence.size <= 10) 1.0 else 0.0
+        val midLength = if (sentence.size > 10 && sentence.size <= 80) 1.0 else 0.0
+        val longLength = if (sentence.size > 80) 1.0 else 0.0
+
+        List(punctuation, caps, vowels, capWords, slowRelease, firstWordCap, emojis, shortLength, midLength, longLength)
+    }
+
+    def tokensToVector(tokens: List[String], pTokens: Option[List[String]] = None): Array[Feature] = {
+        val sentenceSize = tokens.mkString(" ").size.toDouble
+
+        val processedTokens = pTokens match {
+            case Some(pt) => pt
+            case None => processTokens(tokens)
+        }
         val ngrams = getNgramFeatures(tokens, processedTokens).groupBy(w => w).map(w => w._1 -> w._2.size)
-            
-        (ngrams.filter(w => featureMap.contains(w._1)).map {token =>
-            new FeatureNode(featureMap(token._1)._1, token._2)
+
+        // First 2 features are always static
+        val statics = getStaticFeatures(tokens).zipWithIndex.map {feat =>
+            new FeatureNode(feat._2 + additionalFeaturesNum, feat._1.toDouble)
+        } toArray
+
+        val other = (ngrams.filter(w => featureMap.contains(w._1)).map {token =>
+            new FeatureNode(featureMap(token._1)._1, token._2 / sentenceSize)
         } toList).sortBy {
             _.getIndex
         } toArray
+
+        statics ++ other
     }
-        
-    def trainClassifier(data: List[List[String]], labels: List[Double], C: Double, eps: Double, language: String) = {
-        Logger.info("Started training")
+
+    def trainClassifier(data: List[List[String]], additionalFeatures: List[Array[FeatureNode]],
+            labels: List[Double], C: Double, eps: Double, language: String) = {
         // Get all sentences
-        val sentences = {
-            val aLabels = labels.toArray
-            data.zipWithIndex.flatMap {d =>
-                if (d._2 % 1000 == 0) Logger.info("Getting sentences for record " + d._2)
-                NLP.getSentences(d._1, language).filter(!_.isEmpty).map(s => (s, aLabels(d._2)))
-            } map {s =>
-                (s._1.split(" ").toList, s._2)
-            }
+        val sentences = data.zipWithIndex.flatMap {d =>
+            if (splitSentences)
+                NLP.getSentences(d._1, language).filter(!_.isEmpty).map(s => (s, labels(d._2)))
+            else
+                List((d._1.mkString(" "), labels(d._2)))
+        } map {s =>
+            (s._1.split(" ").toList, s._2)
         }
-        
         // Add all data
-        sentences.zipWithIndex.foreach(s => {
-            if (s._2 % 100 == 0) Logger.info("Preprocessing training record " + s._2)
-            addDocument(s._1._1)
-        })
+        sentences.foreach {s =>
+            // Convert the negated tokens
+            val processedTokens = processTokens(s._1)
+            addDocument(s._1, processedTokens)
+        }
 
         // Remove all words occurring too infrequently
         featureMap.retain((k,v) => v._2 >= _minCount)
-        
-        // Renumber them all
-        featureOffset = 1
+
+        // Find the highest number of additional features
+        additionalFeaturesNum = if (additionalFeatures.size > 0)
+            (additionalFeatures.flatten.maxBy {f =>
+                f.getIndex
+            } getIndex) + 1
+        else 1
+
+        // Renumber them all, start at 11 because we have 10 static features
+        featureOffset = additionalFeaturesNum + 11
         featureMap.foreach {fm =>
             featureMap.update(fm._1, (featureOffset, fm._2._2))
             featureOffset += 1
         }
-        
+
         // Set up the data
         val p = new Problem
-        p.n = featureMap.size
+        // Add the ten features we always add to n, also add the featuresToAdd
+        p.n = featureMap.size + 10 + additionalFeaturesNum
         // Construct the liblinear vectors now
-        p.x = sentences.map {datum =>
+        p.x = if (additionalFeatures.size > 0) {
+            sentences.zip(additionalFeatures).map {datum =>
+                datum._2 ++ tokensToVector(datum._1._1)
+            } toArray
+        }
+        else sentences.map {datum =>
             tokensToVector(datum._1)
         } toArray
-        
+
         p.l = p.x.size
         p.y = sentences.map(_._2).toArray
-        
+
         val param = new Parameter(SolverType.MCSVM_CS, C, eps)
         // Train model
         model = Linear.train(p, param)
     }
-    
-    def predict(tokens: List[String], language: String) = {
+
+    def predict(tokens: List[String], additionalFeatures: Array[FeatureNode], language: String, defaultClass: Option[Int] = None): Double = {
         // Get sentences
-        val sentences = NLP.getSentences(tokens, language)
-        if (sentences.isEmpty) -1.0 else
-            (sentences.map {sentence =>
-                val vector = tokensToVector(sentence.split(" ").toList)
-                if (vector.isEmpty) -1.0 else Linear.predict(model, vector)
-            }).groupBy(a => a).map(pred => {
-                pred._1 -> pred._2.size
-            }).toList.sortBy(_._2)(Ordering[Int].reverse).head._1
+        val sentences = if (splitSentences) NLP.getSentences(tokens, language) else List(tokens.mkString(" "))
+        if (sentences.foldLeft(0)(_ + _.size) < 10)
+            defaultClass match {
+                case Some(c) => c
+                case None    => -1.0
+            }
+        else
+            sentences.map { sentence =>
+                // Get feature vector with additional features
+                val vector = additionalFeatures ++ tokensToVector(sentence.split(" ").toList)
+
+                if (vector.isEmpty)
+                    defaultClass match {
+                        case Some(c) => c
+                        case None    => -1.0
+                    }
+                else
+                    Linear.predict(model, vector)
+            }.groupBy { a => a }.maxBy { case (_, group) => group.size }._1
     }
-    
+
     override def serialize(filename: String): Unit = {
         val oos = new ObjectOutputStream(new FileOutputStream(filename))
         oos.writeObject(Map(
                 "f" -> featureMap,
+                "a" -> additionalFeaturesNum,
                 "minCount" -> _minCount,
                 "seedWords" -> _seedWords,
                 "rightFlips" -> _rightFlips,
                 "leftFlips" -> _leftFlips,
-                "ft" -> fastTextModel
+                "split" -> splitSentences
         ))
         oos.close
         model.save(new File(filename + ".svm"))
@@ -196,13 +264,17 @@ class ShortTextClassifier(
 
         featureMap.clear
         featureMap ++= obj("f").asInstanceOf[collection.mutable.Map[String, (Int, Int)]]
+        additionalFeaturesNum = obj("a").asInstanceOf[Int]
         _minCount = obj("minCount").asInstanceOf[Int]
-        _seedWords = obj("seedWords").asInstanceOf[Map[String, List[Array[Double]]]]
+        _seedWords = obj("seedWords").asInstanceOf[Map[String, List[String]]]
         _rightFlips = obj("rightFlips").asInstanceOf[List[String]]
         _leftFlips = obj("leftFlips").asInstanceOf[List[String]]
-        val fModel = obj("ft").asInstanceOf[String]
-        ftw = FastTextCache.getModel(fModel)
-        
+        splitSentences = try {
+            obj("split").asInstanceOf[Boolean]
+        } catch {
+            case e: Exception => true
+        }
+
         model = Model.load(new File(filename + ".svm"))
     }
 }

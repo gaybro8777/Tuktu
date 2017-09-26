@@ -175,7 +175,10 @@ class FacebookTaggerProcessor(resultName: String) extends BaseProcessor(resultNa
             item = {
                 val obj = datum(objField).asInstanceOf[JsObject]
                 // Check if this is a comment or not
-                if ((obj \ "is_comment").as[Boolean]) (obj \ "post").as[JsObject] else obj
+                if ((obj \ "is_comment").as[Boolean])
+                    if ((obj \ "is_comment_to_post").as[Boolean])
+                        (obj \ "post").as[JsObject] else (obj \ "comment" \ "post").as[JsObject]
+                else obj
             }
 
             u = users match {
@@ -194,8 +197,9 @@ class FacebookTaggerProcessor(resultName: String) extends BaseProcessor(resultNa
                                 case None        => Some(s)
                             }) match {
                                 case None => None
-                                case Some(tag) => userReplacements.find(_._1 == tag).flatMap { r =>
-                                    Some(r._2)
+                                case Some(tag) => userReplacements.find(_._1 == tag) match {
+                                    case None    => Some(tag)
+                                    case Some(r) => Some(r._2)
                                 }
                             }
                         }

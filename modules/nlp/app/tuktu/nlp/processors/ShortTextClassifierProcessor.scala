@@ -1,18 +1,16 @@
 package tuktu.nlp.processors
 
-import play.api.libs.json.JsObject
-import play.api.libs.iteratee.Enumeratee
-import tuktu.api.BaseProcessor
-import scala.concurrent.Future
-import tuktu.api.DataPacket
 import scala.concurrent.ExecutionContext.Implicits.global
-import tuktu.ml.processors.BaseMLTrainProcessor
-import tuktu.nlp.models.ShortTextClassifier
+
+import play.api.libs.json.JsObject
+import play.api.libs.json.Json
+import tuktu.api.BaseProcessor
+import tuktu.api.utils
 import tuktu.ml.processors.BaseMLApplyProcessor
 import tuktu.ml.processors.BaseMLDeserializeProcessor
-import tuktu.api.utils
-import play.api.libs.json.Json
-import com.github.jfasttext.JFastText
+import tuktu.ml.processors.BaseMLTrainProcessor
+import tuktu.nlp.models.ShortTextClassifier
+import de.bwaldvogel.liblinear.FeatureNode
 
 class ShortTextClassifierTrainProcessor(resultName: String) extends BaseMLTrainProcessor[ShortTextClassifier](resultName) {
     var tokensField: String = _
@@ -24,8 +22,8 @@ class ShortTextClassifierTrainProcessor(resultName: String) extends BaseMLTrainP
     var rightFlipFile: String = _
     var leftFlipFile: String = _
     var seedWordFile: String = _
-    var vectorFile: String = _
-    var similarityThreshold: Double = _
+    var featuresToAdd: List[String] = _
+    var splitSentences: String = _
     
     override def initialize(config: JsObject) {
         tokensField = (config \ "data_field").as[String]
@@ -40,14 +38,13 @@ class ShortTextClassifierTrainProcessor(resultName: String) extends BaseMLTrainP
         leftFlipFile = (config \ "left_flip_file").as[String]
         seedWordFile = (config \ "seed_word_file").as[String]
         
-        vectorFile = (config \ "vector_file").as[String]
-        similarityThreshold = (config \ "similarity_threshold").as[Double]
+        featuresToAdd = (config \ "features_to_add").asOpt[List[String]].getOrElse(Nil)
+        splitSentences = (config \ "split_sentences").asOpt[String].getOrElse("true")
         
         super.initialize(config)
     }
     
-    override def instantiate(data: List[Map[String, Any]]): ShortTextClassifier =
-        new ShortTextClassifier(minCount, utils.evaluateTuktuString(vectorFile, data.head), similarityThreshold)
+    override def instantiate(data: List[Map[String, Any]]): ShortTextClassifier = new ShortTextClassifier(minCount)
     
     override def train(data: List[Map[String, Any]], model: ShortTextClassifier): ShortTextClassifier = {
         // Add the documents
@@ -63,6 +60,19 @@ class ShortTextClassifierTrainProcessor(resultName: String) extends BaseMLTrainP
                 case _ => datum(labelField).toString.toDouble
             })
         }
+        
+        // Get all the features we need to add
+        val vectorFeaturesToAdd = if (featuresToAdd.size > 0)
+            data.map {datum =>
+                (featuresToAdd.map {f =>
+                    datum(f) match {
+                        case _ => datum(f) match {
+                            case n: Array[FeatureNode] => n
+                            case n: Seq[FeatureNode] => n.toArray
+                        }
+                    }
+                }).foldLeft(Array.empty[FeatureNode])(_ ++ _)
+            } else Nil
         
         // Read the seed words from file
         val seedWords = {
@@ -86,8 +96,8 @@ class ShortTextClassifierTrainProcessor(resultName: String) extends BaseMLTrainP
         }
         
         // Train
-        model.setWords(seedWords, rightFlips, leftFlips)
-        model.trainClassifier(x.toList, y.toList, C, eps, utils.evaluateTuktuString(lang, data.head))
+        model.setWords(seedWords, rightFlips, leftFlips, utils.evaluateTuktuString(splitSentences, data.head).toBoolean)
+        model.trainClassifier(x.toList, vectorFeaturesToAdd, y.toList, C, eps, utils.evaluateTuktuString(lang, data.head))
         
         model
     }
@@ -96,10 +106,14 @@ class ShortTextClassifierTrainProcessor(resultName: String) extends BaseMLTrainP
 class ShortTextClassifierApplyProcessor(resultName: String) extends BaseMLApplyProcessor[ShortTextClassifier](resultName) {
     var dataField = ""
     var lang: String = _
+    var featuresToAdd: List[String] = _
+    var defaultClass: Option[String] = _
     
     override def initialize(config: JsObject) {
         dataField = (config \ "data_field").as[String]
         lang = (config \ "language").asOpt[String].getOrElse("en")
+        featuresToAdd = (config \ "features_to_add").asOpt[List[String]].getOrElse(Nil)
+        defaultClass = (config \ "default_class").asOpt[String]
         
         super.initialize(config)
     }
@@ -107,13 +121,29 @@ class ShortTextClassifierApplyProcessor(resultName: String) extends BaseMLApplyP
     override def applyModel(resultName: String, data: List[Map[String, Any]], model: ShortTextClassifier): List[Map[String, Any]] = {
         data.map {datum =>
             datum + (resultName -> {
+                // Get all the features we need to add
+                val vectorFeaturesToAdd = if (featuresToAdd.size > 0)
+                    (featuresToAdd.map {f =>
+                        datum(f) match {
+                            case n: Array[FeatureNode] => n
+                            case n: Seq[FeatureNode] => n.toArray
+                        }
+                    }).foldLeft(Array.empty[FeatureNode])(_ ++ _)
+                    else Array.empty[FeatureNode]
+                
+                // Get default class if any
+                val newDefaultClass = defaultClass match {
+                    case Some(dc) => Some(utils.evaluateTuktuString(dc, datum).toInt)
+                    case None => None
+                }
+                
+                // Run the prediction
                 model.predict(datum(dataField) match {
                     case s: Seq[String] => s.toList
                     case s: Array[String] => s.toList
-                    case s: List[String] => s
                     case s: String => s.split(" ").toList
                     case _ => datum(dataField).toString.split(" ").toList
-                }, utils.evaluateTuktuString(lang, data.head))
+                }, vectorFeaturesToAdd, utils.evaluateTuktuString(lang, data.head), newDefaultClass)
             }) 
         }
     }
@@ -121,17 +151,15 @@ class ShortTextClassifierApplyProcessor(resultName: String) extends BaseMLApplyP
 
 class ShortTextClassifierDeserializeProcessor(resultName: String) extends BaseMLDeserializeProcessor[ShortTextClassifier](resultName) {
     var minCount: Int = _
-    var similarityThreshold: Double = _
     
     override def initialize(config: JsObject) {
         minCount = (config \ "min_count").as[Int]
-        similarityThreshold = (config \ "similarity_threshold").as[Double]
         
         super.initialize(config)
     }
     
     override def deserializeModel(filename: String) = {
-        val model = new ShortTextClassifier(minCount, null, similarityThreshold)
+        val model = new ShortTextClassifier(minCount)
         model.deserialize(filename)
         model
     }
