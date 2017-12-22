@@ -188,7 +188,24 @@ class CommentCollector(fbClient: DefaultFacebookClient, authorCollector: ActorRe
                         val objectList = try {
                             new Connection[JsonObject](fbClient, response.getBody, classOf[JsonObject])
                         } catch {
-                            case e: com.restfb.json.JsonException => null
+                            case e: com.restfb.json.JsonException => {
+                                // Log the error for fault tracking
+                                Logger.error("Failed to get comments for: " + urls(offset) + "\r\n" + response.getBody)
+                                
+                                // Check if this is because the actual object no longer exists
+                                try {
+                                    val json = Json.parse(response.getBody).as[JsObject]
+                                    if ((json \ "error" \ "code").as[Int] == 100) {// 100 == not exists
+                                        // Remove this URL from our poll list to prevent future errors
+                                        posts -= usePosts(offset)._1
+                                        Logger.info("Removing no longer existing post from queue: " + urls(offset))
+                                    }
+                                } catch {
+                                    case e: Exception => {}
+                                }
+                                
+                                null
+                            }
                         }
                         if (objectList != null) {
                             objectList.foreach(objects => {
@@ -210,7 +227,10 @@ class CommentCollector(fbClient: DefaultFacebookClient, authorCollector: ActorRe
                                             buffer.clear
                                         }
                                     } catch {
-                                        case e: com.restfb.json.JsonException => {}
+                                        case e: com.restfb.json.JsonException => {
+                                            Logger.error("Failed to parse JSON for comment: " + obj.toString)
+                                            e.printStackTrace()
+                                        }
                                     }
                                 })
                             })
@@ -251,9 +271,18 @@ class AuthorCollector(fbClient: DefaultFacebookClient, channel: Concurrent.Chann
         }
         case a: ActorRef => commentCollector = a
         case pr: PostList => {
-            val usePosts = pr.posts.toList
+            val (usePosts, skipPosts) = pr.posts.toList.partition {post =>
+                post.keys.contains("from")
+            }
+            // Send the ones to skip directly one
+            skipPosts.foreach {post =>
+                channel.push(new DataPacket(List(Map(resultName -> {
+                    post ++ Json.obj("is_comment" -> pr.is_comment)
+                }))))
+            }
+            
             // We don't know the type, so are constrained to using metadata to figure it out
-            val requestLists = (pr.posts.map {post =>
+            val requestLists = (usePosts.map {post =>
                 // Add the batched request for from
                 new BatchRequestBuilder((post \ "from" \ "id").as[String])
                         .parameters(Parameter.`with`("metadata", 1))
@@ -360,7 +389,7 @@ class FacebookGenerator(resultName: String, processors: List[Enumeratee[DataPack
             val commentFrequency = (config \ "comment_frequency").asOpt[Int].getOrElse(5)
             
             // Set up RestFB
-            val fbClient = new DefaultFacebookClient(aToken, Version.VERSION_2_8)
+            val fbClient = new DefaultFacebookClient(aToken, Version.VERSION_2_10)
 
             // Filters that we need to check
             val (_, userids, _) = Common.getFilters(config)
